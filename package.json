@@ -1,0 +1,38 @@
+{
+  "name": "smd-prime",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Production-grade Telegram Mini App streaming platform connected live to 7TB Google Drive and TMDB API",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "oxlint",
+    "sync": "node sync_drive_to_supabase.js",
+    "sync:auto": "node auto_sync.js",
+    "bot": "python bot.py",
+    "test:credentials": "node test_credentials.js",
+    "test:audit": "node test_tmdb_sync.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
+    "@tailwindcss/vite": "^4.3.3",
+    "@twa-dev/sdk": "^8.0.2",
+    "dotenv": "^17.4.2",
+    "framer-motion": "^13.1.0",
+    "lucide-react": "^1.32.0",
+    "plyr": "^3.8.4",
+    "plyr-react": "^6.0.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "oxlint": "^1.75.0",
+    "vite": "^8.2.0"
+  }
+}
