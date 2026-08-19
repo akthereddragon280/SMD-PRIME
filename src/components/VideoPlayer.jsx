@@ -12,10 +12,8 @@ import { triggerHaptic, useTelegramBackButton } from '../utils/telegram';
 export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) {
   const videoRef = useRef(null);
 
-  const movieUid = propMovieUid || movie?.uid || movie?.id || 'batchmates_2026';
+  const movieUid = propMovieUid || movie?.uid || movie?.id || 'master_2021';
   const movieTitle = movie?.title || 'Movie Stream';
-
-  const WORKER_PROXY = import.meta.env?.VITE_WORKER_PROXY_URL || 'https://tgstream.smd-prime.workers.dev/?id=';
 
   // Video State Management
   const [sources, setSources] = useState(movie?.sources || []);
@@ -46,11 +44,13 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   // Bind Telegram native BackButton
   useTelegramBackButton(onClose);
 
-  // 1. Fetch Quality Sources from Supabase movie_sources table
+  // 1. Fetch Dynamic Movie Quality Sources from Supabase 'movie_sources' Table
   useEffect(() => {
     async function fetchMovieSources() {
       setLoading(true);
       try {
+        let availableSources = (movie?.sources && movie.sources.length > 0) ? movie.sources : [];
+
         const { data, error } = await supabase
           .from('movie_sources')
           .select('*')
@@ -61,15 +61,16 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
         }
 
         if (data && data.length > 0) {
-          setSources(data);
-          const defaultSrc = data.find(s => s.quality === '1080p') || data.find(s => s.quality === '720p') || data[0];
-          setCurrentQuality(defaultSrc.quality);
-          setActiveVideoUrl(getProxyStreamUrl(defaultSrc.drive_file_id));
-        } else if (movie?.sources && movie.sources.length > 0) {
-          setSources(movie.sources);
-          const defaultSrc = movie.sources[0];
+          availableSources = data;
+        }
+
+        if (availableSources.length > 0) {
+          setSources(availableSources);
+          const defaultSrc = availableSources.find(s => s.quality === '1080p') || 
+                             availableSources.find(s => s.quality === '720p') || 
+                             availableSources[0];
           setCurrentQuality(defaultSrc.quality || '1080p');
-          setActiveVideoUrl(getProxyStreamUrl(defaultSrc.drive_file_id || movie.file_id));
+          setActiveVideoUrl(getProxyStreamUrl(defaultSrc.drive_file_id || movie?.file_id));
         } else {
           const fallbackId = movie?.file_id || '1djKAD3UQmBPgkeBBLCrZjAW-D4Fod_Ng';
           const defaultSources = [
@@ -88,10 +89,8 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
       }
     }
 
-    if (movieUid) {
-      fetchMovieSources();
-    }
-  }, [movieUid]);
+    fetchMovieSources();
+  }, [movieUid, movie]);
 
   // 2. Play / Pause Handler
   const togglePlay = () => {
@@ -107,7 +106,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     }
   };
 
-  // 3. Skip ±10 Seconds (Buttons & Gesture Zones)
+  // 3. Skip ±10 Seconds
   const skipTime = (seconds) => {
     triggerHaptic('medium');
     if (videoRef.current) {
@@ -119,17 +118,19 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     }
   };
 
-  // 4. Quality Switcher (Preserves Playback Timestamp)
+  // 4. Dynamic Live Quality Switcher (Preserves exact Playback Timestamp)
   const handleQualityChange = (sourceObj) => {
     triggerHaptic('medium');
     const savedTimestamp = videoRef.current?.currentTime || currentTime;
+    const targetQuality = sourceObj.quality || 'HD';
+    const driveId = sourceObj.drive_file_id || movie?.file_id;
 
-    setCurrentQuality(sourceObj.quality);
-    const newUrl = getProxyStreamUrl(sourceObj.drive_file_id);
+    setCurrentQuality(targetQuality);
+    const newUrl = getProxyStreamUrl(driveId);
     setActiveVideoUrl(newUrl);
     setShowQualityMenu(false);
 
-    setTouchFeedback(`Switched to ${sourceObj.quality}`);
+    setTouchFeedback(`Switched to ${targetQuality}`);
     setTimeout(() => setTouchFeedback(null), 1200);
 
     // Restore exact timestamp when new quality stream loads
@@ -140,7 +141,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
         videoRef.current.play().catch(() => {});
         setIsPlaying(true);
       }
-    }, 350);
+    }, 400);
   };
 
   // 5. Speed Switcher
@@ -184,12 +185,17 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     }
   };
 
-  // Time Formatter (HH:MM:SS)
+  // Time Formatter (Hours & Minutes format: e.g. 2h 37m)
   const formatTime = (timeInSeconds) => {
-    if (isNaN(timeInSeconds)) return '00:00';
-    const mins = Math.floor(timeInSeconds / 60);
+    if (isNaN(timeInSeconds) || timeInSeconds <= 0) return '0h 00m';
+    const hours = Math.floor(timeInSeconds / 3600);
+    const mins = Math.floor((timeInSeconds % 3600) / 60);
     const secs = Math.floor(timeInSeconds % 60);
-    return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    
+    if (hours > 0) {
+      return `${hours}h ${mins < 10 ? '0' : ''}${mins}m`;
+    }
+    return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
   };
 
   // 8. Fullscreen & Orientation Lock Toggle
@@ -347,7 +353,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
               )}
             </div>
 
-            {/* Quality Switcher Button */}
+            {/* Live Dynamic Quality Switcher Button */}
             <div className="relative">
               <button
                 onClick={() => {
@@ -359,7 +365,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                 className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold flex items-center gap-1 shadow-lg shadow-red-600/30 active:scale-95 border border-red-500/50"
               >
                 <Settings className="w-3.5 h-3.5" />
-                <span>{currentQuality || 'HD'}</span>
+                <span>{currentQuality || '1080p'}</span>
               </button>
 
               {showQualityMenu && (
@@ -367,20 +373,25 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="absolute right-0 top-11 w-40 rounded-2xl bg-slate-900/95 border border-slate-800 p-2 z-40 shadow-2xl backdrop-blur-xl"
+                  className="absolute right-0 top-11 w-44 rounded-2xl bg-slate-900/95 border border-slate-800 p-2 z-40 shadow-2xl backdrop-blur-xl"
                 >
-                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 px-2 py-1 border-b border-slate-800 mb-1">
-                    Quality
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 px-2 py-1 border-b border-slate-800 mb-1 flex items-center justify-between">
+                    <span>Quality ({sources.length})</span>
+                    <span className="text-[9px] text-emerald-400 font-mono">LIVE</span>
                   </div>
-                  {sources.map((s) => (
+
+                  {sources.map((s, idx) => (
                     <button
-                      key={s.id || s.quality}
+                      key={idx}
                       onClick={() => handleQualityChange(s)}
                       className={`w-full px-2.5 py-1.5 rounded-lg text-xs font-extrabold flex items-center justify-between transition-all ${
                         currentQuality === s.quality ? 'bg-red-600 text-white' : 'text-slate-300 hover:bg-slate-800'
                       }`}
                     >
-                      <span>{s.quality}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span>{s.quality || '1080p'}</span>
+                        {currentQuality === s.quality && <Check className="w-3 h-3 text-white" />}
+                      </div>
                       <span className="text-[10px] font-mono text-slate-400">{s.file_size || 'HD'}</span>
                     </button>
                   ))}
@@ -406,111 +417,91 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
             />
           </div>
 
-          {/* Big Center Play / Pause Overlay Button */}
-          <div className="absolute z-20 pointer-events-none">
-            <button
-              onClick={togglePlay}
-              className="pointer-events-auto w-16 h-16 rounded-full bg-red-600/90 hover:bg-red-600 text-white flex items-center justify-center shadow-2xl backdrop-blur-md active:scale-95 transition-all"
-            >
-              {isPlaying ? <Pause className="w-8 h-8 fill-current" /> : <Play className="w-8 h-8 fill-current ml-1" />}
-            </button>
-          </div>
-
-          {/* Gesture Toast Feedback */}
+          {/* Touch Gesture HUD Feedback */}
           {touchFeedback && (
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              className="absolute z-30 px-5 py-2.5 rounded-2xl bg-red-600/90 text-white font-extrabold text-sm backdrop-blur-md shadow-2xl animate-pulse"
-            >
+            <div className="absolute z-30 px-4 py-2 rounded-2xl bg-slate-900/90 text-white font-extrabold text-sm border border-slate-700 shadow-2xl backdrop-blur-md animate-bounce">
               {touchFeedback}
-            </motion.div>
+            </div>
           )}
 
-          {/* HTML5 Video Element with CSS Brightness Filter */}
-          <div className="w-full max-w-5xl aspect-video">
-            {activeVideoUrl ? (
-              <video
-                ref={videoRef}
-                key={activeVideoUrl}
-                playsInline
-                crossOrigin="anonymous"
-                poster={movie?.banner_url || movie?.thumbnail_url}
-                onTimeUpdate={() => {
-                  if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
-                }}
-                onLoadedMetadata={() => {
-                  if (videoRef.current) setDuration(videoRef.current.duration);
-                }}
-                style={{ filter: `brightness(${brightness}%)` }}
-                className="w-full h-full object-contain"
-              >
-                <source src={activeVideoUrl} type="video/mp4" />
-              </video>
-            ) : (
-              <div className="text-slate-400 text-xs font-medium">
-                No video stream sources available.
-              </div>
-            )}
-          </div>
+          {/* Main Video Element */}
+          <video
+            ref={videoRef}
+            src={activeVideoUrl}
+            autoPlay
+            playsInline
+            style={{ filter: `brightness(${brightness}%)` }}
+            className="w-full h-full object-contain z-0"
+            onTimeUpdate={() => {
+              if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+            }}
+            onLoadedMetadata={() => {
+              if (videoRef.current) {
+                setDuration(videoRef.current.duration);
+                videoRef.current.playbackRate = playbackSpeed;
+              }
+              setLoading(false);
+            }}
+            onEnded={() => setIsPlaying(false)}
+            onClick={togglePlay}
+          />
         </div>
 
-        {/* Bottom Control Bar & Timeline Scrubbing Bar */}
+        {/* Bottom Control Bar */}
         <div className="w-full z-30 p-3 sm:p-4 bg-gradient-to-t from-slate-950/95 via-slate-950/70 to-transparent flex flex-col gap-2">
           
-          {/* Progress Timeline Scrubber */}
-          <div className="flex items-center gap-3">
-            <span className="text-[11px] font-mono font-bold text-slate-300 min-w-[42px]">
+          {/* Scrubbing Timeline Bar */}
+          <div className="flex items-center gap-3 w-full">
+            <span className="text-[11px] font-mono font-bold text-slate-300 min-w-[50px]">
               {formatTime(currentTime)}
             </span>
+
             <input
               type="range"
               min="0"
               max={duration || 100}
               value={currentTime}
               onChange={handleSeekChange}
-              className="w-full h-1.5 bg-slate-700/80 rounded-lg appearance-none cursor-pointer accent-red-600"
+              className="flex-1 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-red-600 hover:accent-red-500"
             />
-            <span className="text-[11px] font-mono font-bold text-slate-400 min-w-[42px] text-right">
+
+            <span className="text-[11px] font-mono font-bold text-slate-400 min-w-[50px] text-right">
               {formatTime(duration)}
             </span>
           </div>
 
-          {/* VLC Control Bar Buttons */}
+          {/* Player Buttons Bar */}
           <div className="flex items-center justify-between pt-1">
             
-            {/* Play, Rewind 10s, Forward 10s */}
+            {/* Playback Controls Group */}
             <div className="flex items-center gap-3">
               <button
                 onClick={togglePlay}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95"
+                className="p-2 rounded-xl bg-red-600 hover:bg-red-700 text-white shadow-lg active:scale-95 transition-all"
               >
                 {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
               </button>
 
               <button
                 onClick={() => skipTime(-10)}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95"
-                title="-10s"
+                className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 active:scale-95"
+                title="Rewind 10s"
               >
-                <RotateCcw className="w-4 h-4" />
+                <Rewind className="w-4 h-4" />
               </button>
 
               <button
                 onClick={() => skipTime(10)}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95"
-                title="+10s"
+                className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 active:scale-95"
+                title="Forward 10s"
               >
-                <RotateCw className="w-4 h-4" />
+                <FastForward className="w-4 h-4" />
               </button>
-            </div>
 
-            {/* Volume Control & Fullscreen Toggle */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <button onClick={toggleMute} className="text-slate-300 hover:text-white">
-                  {isMuted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              {/* Volume Slider & Mute Toggle */}
+              <div className="flex items-center gap-2 hidden sm:flex">
+                <button onClick={toggleMute} className="text-slate-400 hover:text-white">
+                  {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-red-500" /> : <Volume2 className="w-4 h-4" />}
                 </button>
                 <input
                   type="range"
@@ -519,22 +510,24 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                   step="0.05"
                   value={isMuted ? 0 : volume}
                   onChange={handleVolumeChange}
-                  className="w-16 sm:w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-white"
+                  className="w-20 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-red-600"
                 />
               </div>
+            </div>
 
+            {/* Right Controls Group (Fullscreen) */}
+            <div className="flex items-center gap-2">
               <button
                 onClick={toggleFullscreen}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95"
-                title="Fullscreen Toggle"
+                className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 active:scale-95"
               >
-                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+                {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
               </button>
             </div>
 
           </div>
-
         </div>
+
       </motion.div>
     </AnimatePresence>
   );

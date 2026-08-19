@@ -1,6 +1,6 @@
 /**
- * SMD PRIME - Cloudflare Worker Google Drive to Supabase Dynamic TMDB Sync Engine
- * 100% Live TMDB API Querying & Zero Hardcoded Dictionaries
+ * SMD PRIME - Cloudflare Worker Google Drive Stream & Direct File Download Gateway
+ * Handles live video streaming, Range requests, and Direct File Attachment Downloads.
  */
 
 const TMDB_GENRE_MAP = {
@@ -15,16 +15,26 @@ export default {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, Range',
     };
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
 
+    const url = new URL(request.url);
+    const fileId = url.searchParams.get('id');
+    const isDownload = url.searchParams.has('download') || url.searchParams.get('dl') === '1';
+
+    // Handle Direct Video Proxy Stream & Download Requests
+    if (fileId) {
+      return handleGoogleDriveStream(request, fileId, isDownload, env, corsHeaders);
+    }
+
+    // Default: Trigger Sync
     try {
       const summary = await triggerDriveToSupabaseSync(env);
-      return new Response(JSON.stringify({ success: true, message: 'Dynamic TMDB Sync Completed Successfully!', data: summary }), {
+      return new Response(JSON.stringify({ success: true, message: 'Dynamic Sync Completed Successfully!', data: summary }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     } catch (err) {
@@ -39,6 +49,52 @@ export default {
     ctx.waitUntil(triggerDriveToSupabaseSync(env));
   }
 };
+
+/**
+ * Handle Google Drive Direct Stream & Direct Attachment Download
+ */
+async function handleGoogleDriveStream(request, fileId, isDownload, env, corsHeaders) {
+  try {
+    const SA_EMAIL = env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 'tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com';
+    const SA_KEY = env.GOOGLE_PRIVATE_KEY;
+    const token = await getGoogleAccessToken(SA_EMAIL, SA_KEY);
+
+    const driveUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    const headers = new Headers();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    const range = request.headers.get('Range');
+    if (range) {
+      headers.set('Range', range);
+    }
+
+    const driveRes = await fetch(driveUrl, { headers });
+    const responseHeaders = new Headers(driveRes.headers);
+
+    // Apply CORS Headers
+    Object.entries(corsHeaders).forEach(([k, v]) => responseHeaders.set(k, v));
+
+    // Force DIRECT ATTACHMENT DOWNLOAD if download=1 param is present
+    if (isDownload) {
+      responseHeaders.set('Content-Disposition', `attachment; filename="SMD_PRIME_Movie_${fileId}.mp4"`);
+      responseHeaders.set('Content-Type', 'application/octet-stream');
+    } else {
+      if (!responseHeaders.has('Content-Type')) {
+        responseHeaders.set('Content-Type', 'video/mp4');
+      }
+    }
+
+    return new Response(driveRes.body, {
+      status: driveRes.status,
+      statusText: driveRes.statusText,
+      headers: responseHeaders
+    });
+  } catch (err) {
+    return new Response(`Stream Error: ${err.message}`, { status: 500, headers: corsHeaders });
+  }
+}
 
 /**
  * Main Cloudflare Worker Dynamic Sync Pipeline
@@ -61,11 +117,8 @@ export async function triggerDriveToSupabaseSync(env) {
 
   for (const file of files) {
     const { cleanTitle, year, quality, uid } = parseFileName(file.name);
-    
-    // Live Dynamic Fetch from TMDB API
     const tmdb = await fetchTMDBMetadata(cleanTitle, year, TMDB_API_KEY);
 
-    // Upsert into Supabase 'movies' table
     const mRes = await fetch(`${SUPABASE_URL}/rest/v1/movies`, {
       method: 'POST',
       headers: {
@@ -87,7 +140,6 @@ export async function triggerDriveToSupabaseSync(env) {
       })
     });
 
-    // Upsert into Supabase 'movie_sources' table
     const sRes = await fetch(`${SUPABASE_URL}/rest/v1/movie_sources`, {
       method: 'POST',
       headers: {
@@ -220,7 +272,7 @@ function parseFileName(fullName) {
 }
 
 /**
- * Live Dynamic TMDB Metadata Fetcher (Strict Portrait Poster First, then Landscape)
+ * Live Dynamic TMDB Metadata Fetcher (Strict Portrait Poster First)
  */
 async function fetchTMDBMetadata(title, year, apiKey) {
   try {
@@ -228,7 +280,6 @@ async function fetchTMDBMetadata(title, year, apiKey) {
     let res = await fetch(url, { headers: { 'User-Agent': 'Cloudflare-Worker-TMDB/1.0' } });
     let data = await res.json();
 
-    // Fallback search without year if initial query returned empty
     if (!data.results || data.results.length === 0) {
       url = `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${encodeURIComponent(title)}`;
       res = await fetch(url, { headers: { 'User-Agent': 'Cloudflare-Worker-TMDB/1.0' } });
@@ -238,10 +289,7 @@ async function fetchTMDBMetadata(title, year, apiKey) {
     if (data.results && data.results.length > 0) {
       const m = data.results[0];
 
-      // 1. STRICT PORTRAIT MOVIE POSTER FIRST (2:3 aspect ratio)
       let posterUrl = m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null;
-      
-      // 2. FALLBACK TO LANDSCAPE BACKDROP ONLY IF PORTRAIT POSTER IS MISSING (16:9 aspect ratio)
       if (!posterUrl && m.backdrop_path) {
         posterUrl = `https://image.tmdb.org/t/p/w500${m.backdrop_path}`;
       }
@@ -257,11 +305,8 @@ async function fetchTMDBMetadata(title, year, apiKey) {
         genres: m.genre_ids ? m.genre_ids.map(id => TMDB_GENRE_MAP[id]).filter(Boolean) : ['Action', 'Drama']
       };
     }
-  } catch (err) {
-    console.warn('TMDB Fetch Error:', err.message);
-  }
+  } catch (err) {}
 
-  // Pure dynamic fallback if movie not found on TMDB search
   return {
     title,
     original_title: title,

@@ -66,7 +66,7 @@ export async function fetchMoviesFromSupabase() {
         genre: genresList[0] || 'Action',
         all_genres: genresList,
         year: item.release_year ? String(item.release_year) : (meta.release_year ? String(meta.release_year) : '2026'),
-        duration: '2h 15m',
+        duration: item.duration || meta.duration || '2h 15m',
         rating: ratingValue,
         trending: true,
         isHero: true,
