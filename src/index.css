@@ -9,8 +9,6 @@
 
   body {
     font-family: var(--font-sans);
-    background-color: #f8fafc;
-    color: #0f172a;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
@@ -39,22 +37,30 @@
   scroll-snap-align: start;
 }
 
-/* Light glassmorphism effect */
-.glass-light {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(226, 232, 240, 0.8);
+/* Glassmorphism Utilities */
+.glass-panel-light {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  box-shadow: 0 20px 50px -10px rgba(15, 23, 42, 0.07);
 }
 
-.glass-dark-overlay {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(248, 250, 252, 0.8) 60%, rgba(248, 250, 252, 1) 100%);
+.glass-panel-dark {
+  background: rgba(12, 15, 24, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.75);
 }
 
-/* Netflix Cinema Red Accents */
-.badge-red {
-  background-color: #e50914;
-  color: #ffffff;
+/* Glow Effects */
+.shadow-glow-red {
+  box-shadow: 0 0 25px -3px rgba(225, 29, 72, 0.4);
+}
+
+.text-glow-red {
+  text-shadow: 0 0 15px rgba(225, 29, 72, 0.5);
 }
 
 /* Plymouth Custom Styling Adjustments for Mobile Mini App */

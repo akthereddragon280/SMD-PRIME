@@ -55,33 +55,45 @@ export default function App() {
   const categories = ['All', 'Trending', 'Action', 'Sci-Fi', 'Drama'];
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${
-      darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-200/60 text-slate-900'
-    } flex flex-col items-center justify-start`}>
+    <div className={`min-h-screen transition-colors duration-500 relative flex flex-col items-center justify-start ${
+      darkMode 
+        ? 'bg-[#06080d] text-zinc-100' 
+        : 'bg-gradient-to-br from-slate-100 via-rose-50/20 via-50% to-indigo-50/30 text-slate-900'
+    }`}>
+
+      {/* Ambient Radial Background Light Blobs for Modern Depth */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div className={`absolute -top-40 -left-40 w-96 h-96 rounded-full blur-3xl opacity-20 ${
+          darkMode ? 'bg-red-900' : 'bg-red-400'
+        }`} />
+        <div className={`absolute top-1/3 -right-40 w-96 h-96 rounded-full blur-3xl opacity-20 ${
+          darkMode ? 'bg-indigo-900' : 'bg-sky-400'
+        }`} />
+      </div>
 
       {/* Desktop/Laptop Frame View Mode Toggle Bar */}
-      <div className="w-full bg-slate-900 text-white text-xs px-4 py-2 flex items-center justify-between shadow-md hidden sm:flex">
+      <div className="w-full bg-[#0a0d16] text-white text-xs px-4 py-2 flex items-center justify-between shadow-lg relative z-20 hidden sm:flex border-b border-zinc-800/80">
         <div className="flex items-center gap-3 font-mono">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span className="font-bold">Telegram Mini App Simulator</span>
+          <span className="font-extrabold tracking-wider">Telegram Mini App Simulator</span>
           
-          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 bg-emerald-500/20 text-emerald-400">
+          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
             <Database className="w-3 h-3" />
-            <span>LIVE GOOGLE DRIVE SYNC ({moviesList.length} MOVIES)</span>
+            <span>LIVE MEDIA LIBRARY ({moviesList.length} TITLES)</span>
           </span>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-slate-400 text-[11px]">View Mode:</span>
+          <span className="text-zinc-400 text-[11px] font-semibold">View Mode:</span>
           <button
             onClick={() => {
               triggerHaptic('light');
               setIsMobileFrame(true);
             }}
-            className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition-all text-[11px] ${
+            className={`px-3 py-1 rounded-xl font-extrabold flex items-center gap-1.5 transition-all text-[11px] ${
               isMobileFrame 
-                ? 'bg-red-600 text-white shadow-xs' 
-                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-red-600/30' 
+                : 'bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700'
             }`}
           >
             <Smartphone className="w-3.5 h-3.5" />
@@ -93,10 +105,10 @@ export default function App() {
               triggerHaptic('light');
               setIsMobileFrame(false);
             }}
-            className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition-all text-[11px] ${
+            className={`px-3 py-1 rounded-xl font-extrabold flex items-center gap-1.5 transition-all text-[11px] ${
               !isMobileFrame 
-                ? 'bg-red-600 text-white shadow-xs' 
-                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-red-600/30' 
+                : 'bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700'
             }`}
           >
             <Monitor className="w-3.5 h-3.5" />
@@ -106,30 +118,32 @@ export default function App() {
       </div>
 
       {/* Main Telegram App Container */}
-      <div className={`w-full transition-all duration-300 ${
+      <div className={`w-full transition-all duration-300 relative z-10 ${
         isMobileFrame 
-          ? 'max-w-[440px] sm:my-4 sm:rounded-[36px] shadow-2xl sm:border border-slate-300/80 dark:border-slate-800 overflow-hidden' 
+          ? 'max-w-[440px] sm:my-5 sm:rounded-[36px] shadow-2xl overflow-hidden' 
           : 'max-w-7xl'
       } ${
-        darkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
+        darkMode 
+          ? 'bg-[#0c0f18] text-zinc-100 sm:border border-zinc-800/90 shadow-black/80' 
+          : 'bg-white text-slate-900 sm:border border-slate-200/90 shadow-slate-300/60'
       } min-h-screen relative pb-20`}>
 
         {/* Telegram Native Top Header Simulator (Visible on Mobile Frame) */}
         {isMobileFrame && (
-          <div className="bg-slate-900 text-white px-4 py-2 flex items-center justify-between text-xs font-semibold select-none border-b border-slate-800">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center font-bold text-[10px]">
+          <div className="bg-[#090b12] text-white px-4 py-2.5 flex items-center justify-between text-xs font-semibold select-none border-b border-zinc-800/80">
+            <div className="flex items-center gap-2.5">
+              <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-red-600 to-rose-500 flex items-center justify-center font-black text-[10px] shadow-md shadow-red-600/30">
                 S
               </div>
               <div>
-                <div className="font-extrabold text-white leading-none">SMD PRIME Bot</div>
-                <div className="text-[9px] text-slate-400 leading-none mt-0.5">bot mini app</div>
+                <div className="font-extrabold text-white leading-none tracking-tight">SMD PRIME Bot</div>
+                <div className="text-[9px] text-zinc-400 leading-none mt-0.5 font-mono">bot mini app</div>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 text-slate-400">
-              <MoreVertical className="w-4 h-4 cursor-pointer hover:text-white" />
-              <X className="w-4 h-4 cursor-pointer hover:text-white" />
+            <div className="flex items-center gap-3 text-zinc-400">
+              <MoreVertical className="w-4 h-4 cursor-pointer hover:text-white transition-colors" />
+              <X className="w-4 h-4 cursor-pointer hover:text-white transition-colors" />
             </div>
           </div>
         )}
@@ -153,12 +167,12 @@ export default function App() {
                   triggerHaptic('light');
                   setActiveCategory(cat);
                 }}
-                className={`px-4 py-2 rounded-2xl text-xs font-bold transition-all whitespace-nowrap active:scale-95 ${
+                className={`px-4 py-2 rounded-2xl text-xs font-extrabold transition-all whitespace-nowrap active:scale-95 ${
                   activeCategory === cat
-                    ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+                    ? 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white shadow-lg shadow-red-600/35 border border-red-400/40 transform scale-[1.02]'
                     : darkMode
-                      ? 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
-                      : 'bg-white text-slate-700 border border-slate-200/80 shadow-xs hover:bg-slate-100'
+                      ? 'bg-zinc-900/80 text-zinc-300 border border-zinc-800/90 hover:bg-zinc-800/80 backdrop-blur-md'
+                      : 'bg-white/90 text-slate-700 border border-slate-200/90 shadow-xs hover:bg-slate-100/90 backdrop-blur-md'
                 }`}
               >
                 {cat}
@@ -169,9 +183,9 @@ export default function App() {
 
         {/* Loading Indicator for Supabase */}
         {isLoadingSupabase && (
-          <div className="flex items-center justify-center gap-2 py-8 text-xs font-bold text-slate-500">
+          <div className="flex items-center justify-center gap-2.5 py-12 text-xs font-extrabold text-slate-500">
             <Loader2 className="w-5 h-5 animate-spin text-red-600" />
-            <span>Fetching Live Google Drive Files from Supabase...</span>
+            <span>Fetching Live Google Drive Files...</span>
           </div>
         )}
 
@@ -181,12 +195,14 @@ export default function App() {
             
             {/* Empty State if No Files Synced */}
             {moviesList.length === 0 ? (
-              <div className="my-16 py-12 text-center flex flex-col items-center justify-center border border-dashed border-slate-300 dark:border-slate-800 rounded-3xl p-6">
-                <Film className="w-12 h-12 text-slate-400 mb-3 animate-pulse" />
+              <div className={`my-16 py-12 text-center flex flex-col items-center justify-center border border-dashed rounded-3xl p-6 ${
+                darkMode ? 'border-zinc-800 bg-zinc-900/40' : 'border-slate-300 bg-slate-50/50'
+              }`}>
+                <Film className="w-12 h-12 text-red-600 mb-3 animate-pulse" />
                 <h3 className="text-base font-extrabold text-slate-900 dark:text-white mb-1">
                   No Google Drive Files Found
                 </h3>
-                <p className="text-xs text-slate-500 max-w-xs">
+                <p className="text-xs text-slate-500 max-w-xs leading-relaxed font-medium">
                   Upload video files (.mkv, .mp4) to your Google Drive folder to auto-sync movies live to the TMA dashboard.
                 </p>
               </div>
@@ -212,7 +228,7 @@ export default function App() {
                         onSelectMovie={(m) => setSelectedMovie(m)}
                         onPlay={(m) => setActivePlayingMovie(m)}
                         darkMode={darkMode}
-                        icon={<Flame className="w-5 h-5 fill-red-600 text-red-600" />}
+                        icon={<Flame className="w-5 h-5 fill-red-600 text-red-600 animate-pulse" />}
                       />
                     )}
 
@@ -223,7 +239,7 @@ export default function App() {
                         onSelectMovie={(m) => setSelectedMovie(m)}
                         onPlay={(m) => setActivePlayingMovie(m)}
                         darkMode={darkMode}
-                        icon={<Zap className="w-5 h-5" />}
+                        icon={<Zap className="w-5 h-5 text-amber-500" />}
                       />
                     )}
 
@@ -234,7 +250,7 @@ export default function App() {
                         onSelectMovie={(m) => setSelectedMovie(m)}
                         onPlay={(m) => setActivePlayingMovie(m)}
                         darkMode={darkMode}
-                        icon={<Compass className="w-5 h-5" />}
+                        icon={<Compass className="w-5 h-5 text-cyan-400" />}
                       />
                     )}
 
@@ -245,7 +261,7 @@ export default function App() {
                         onSelectMovie={(m) => setSelectedMovie(m)}
                         onPlay={(m) => setActivePlayingMovie(m)}
                         darkMode={darkMode}
-                        icon={<Clapperboard className="w-5 h-5" />}
+                        icon={<Clapperboard className="w-5 h-5 text-emerald-400" />}
                       />
                     )}
 
@@ -290,53 +306,54 @@ export default function App() {
 
         {/* Footer */}
         <footer className={`mt-12 py-6 border-t text-center ${
-          darkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'
+          darkMode ? 'border-zinc-800/80 text-zinc-500' : 'border-slate-200/80 text-slate-400'
         }`}>
           <div className="px-4 flex flex-col items-center gap-1.5">
-            <div className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-widest text-slate-400">
-              <span>SMD PRIME</span>
+            <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+              <span className="text-red-600">SMD PRIME</span>
               <span>•</span>
-              <span>LIVE GOOGLE DRIVE SYNC</span>
+              <span>PREMIUM CLOUD CINEMA</span>
             </div>
-            <p className="text-[10px] text-slate-400">
-              Proxy Engine: <code className="text-red-500 font-mono">tgstream.smd-prime.workers.dev</code>
+            <p className="text-[10px] font-medium text-slate-400">
+              Ultra High Definition Direct Streaming
             </p>
           </div>
         </footer>
 
-        {/* Details Sheet Modal */}
-        {selectedMovie && (
-          <MovieModal
-            movie={selectedMovie}
-            onClose={() => setSelectedMovie(null)}
-            onPlay={(m) => {
-              setSelectedMovie(null);
-              setActivePlayingMovie(m);
-            }}
-            darkMode={darkMode}
-          />
-        )}
-
-        {/* Fullscreen Video Player */}
-        {activePlayingMovie && (
-          <VideoPlayer
-            movie={activePlayingMovie}
-            onClose={() => setActivePlayingMovie(null)}
-          />
-        )}
-
-        {/* Live Search Overlay */}
-        {isSearchOpen && (
-          <SearchOverlay
-            movies={moviesList}
-            onClose={() => setIsSearchOpen(false)}
-            onSelectMovie={(m) => setSelectedMovie(m)}
-            onPlay={(m) => setActivePlayingMovie(m)}
-            darkMode={darkMode}
-          />
-        )}
-
       </div>
+
+      {/* Details Sheet Modal (Rendered at Root Level for True Viewport Anchoring) */}
+      {selectedMovie && (
+        <MovieModal
+          movie={selectedMovie}
+          onClose={() => setSelectedMovie(null)}
+          onPlay={(m) => {
+            setSelectedMovie(null);
+            setActivePlayingMovie(m);
+          }}
+          darkMode={darkMode}
+        />
+      )}
+
+      {/* Fullscreen Video Player */}
+      {activePlayingMovie && (
+        <VideoPlayer
+          movie={activePlayingMovie}
+          onClose={() => setActivePlayingMovie(null)}
+        />
+      )}
+
+      {/* Live Search Overlay */}
+      {isSearchOpen && (
+        <SearchOverlay
+          movies={moviesList}
+          onClose={() => setIsSearchOpen(false)}
+          onSelectMovie={(m) => setSelectedMovie(m)}
+          onPlay={(m) => setActivePlayingMovie(m)}
+          darkMode={darkMode}
+        />
+      )}
+
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Play, Star, Clock, Calendar, ShieldCheck, Video, Download, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Play, Star, Clock, Calendar, Download, ShieldCheck, Film, CheckCircle2, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../supabaseClient';
 import { getProxyStreamUrl } from '../utils/proxy';
@@ -7,8 +7,9 @@ import { triggerHaptic, useTelegramBackButton } from '../utils/telegram';
 import { getExactMovieDuration } from '../utils/posters';
 
 export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
-  const [downloadingQuality, setDownloadingQuality] = useState(null);
   const [sources, setSources] = useState(movie?.sources || []);
+  const [loadingSources, setLoadingSources] = useState(false);
+  const [downloadingQuality, setDownloadingQuality] = useState(null);
 
   // Bind Telegram native BackButton to close modal when active
   useTelegramBackButton(movie ? onClose : null);
@@ -20,40 +21,69 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
       const targetUid = movie.uid || movie.id;
       if (!targetUid) return;
 
+      setLoadingSources(true);
       try {
         const { data, error } = await supabase
           .from('movie_sources')
           .select('*')
           .eq('movie_uid', targetUid);
 
-        if (data && data.length > 0) {
+        if (!error && data && data.length > 0) {
           setSources(data);
         } else if (movie.sources && movie.sources.length > 0) {
           setSources(movie.sources);
-        } else {
-          setSources([
-            { quality: '1080p', file_size: '2.4 GB', drive_file_id: movie.file_id },
-            { quality: '720p', file_size: '1.2 GB', drive_file_id: movie.file_id },
-            { quality: '480p', file_size: '650 MB', drive_file_id: movie.file_id }
-          ]);
         }
       } catch (err) {
         console.error('Failed to query movie_sources:', err);
+      } finally {
+        setLoadingSources(false);
       }
     }
 
     fetchSourcesForMovie();
   }, [movie]);
 
+  // Lock body & document scroll when movie detail page is open
+  useEffect(() => {
+    const originalBodyOverflow = document.body.style.overflow;
+    const originalHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = originalBodyOverflow;
+      document.documentElement.style.overflow = originalHtmlOverflow;
+    };
+  }, []);
+
   if (!movie) return null;
 
-  const exactDuration = getExactMovieDuration(movie.title, movie.uid, movie.duration);
-  const activeFileId = sources[0]?.drive_file_id || movie.file_id;
-  const streamUrl = getProxyStreamUrl(activeFileId);
+  // Helper to parse file size string into MB for descending sorting
+  const parseSizeInMB = (sizeStr) => {
+    if (!sizeStr) return 0;
+    const str = String(sizeStr).toUpperCase().trim();
+    const val = parseFloat(str.replace(/[^0-9.]/g, '')) || 0;
+    if (str.includes('GB')) return val * 1024;
+    if (str.includes('TB')) return val * 1024 * 1024;
+    return val;
+  };
 
-  const handlePlayClick = () => {
-    triggerHaptic('heavy');
-    onPlay({ ...movie, sources, file_id: activeFileId });
+  const qualityRank = { '4K': 4, '1080p': 3, '720p': 2, '480p': 1 };
+
+  const sortedSources = [...sources].sort((a, b) => {
+    const sizeA = parseSizeInMB(a.file_size);
+    const sizeB = parseSizeInMB(b.file_size);
+    if (sizeA !== sizeB) return sizeB - sizeA;
+    const rankA = qualityRank[a.quality] || 0;
+    const rankB = qualityRank[b.quality] || 0;
+    return rankB - rankA;
+  });
+
+  const exactDuration = getExactMovieDuration(movie.title, movie.uid, movie.duration);
+
+  const handlePlayClick = (source) => {
+    triggerHaptic('medium');
+    if (onPlay) onPlay(movie, source);
   };
 
   const handleDownloadClick = (source) => {
@@ -64,12 +94,11 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
     
     setDownloadingQuality(quality);
 
-    // Dynamic anchor click to trigger direct file attachment download
+    // Trigger cross-origin direct download with target="_blank"
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-    link.setAttribute('download', `${movie.title || 'movie'}_${quality}.mp4`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -81,182 +110,208 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-        
-        {/* Darkened Backdrop */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={() => {
-            triggerHaptic('light');
-            onClose();
-          }}
-          className="fixed inset-0 bg-slate-950/75 backdrop-blur-md"
-        />
-
-        {/* Modal Sheet Container */}
-        <motion.div
-          initial={{ y: '100%', opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: '100%', opacity: 0 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className={`relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl shadow-2xl transition-colors duration-300 z-10 ${
-            darkMode 
-              ? 'bg-slate-900 text-white border-t sm:border border-slate-800' 
-              : 'bg-white text-slate-900 border-t sm:border border-slate-200'
-          }`}
-        >
-          {/* Close Button Header */}
+      <motion.div
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: 20 }}
+        transition={{ type: 'spring', damping: 25, stiffness: 280 }}
+        className={`fixed inset-0 h-[100dvh] w-[100dvw] z-50 overflow-y-auto flex flex-col transition-colors duration-300 ${
+          darkMode 
+            ? 'bg-[#090c15] text-white' 
+            : 'bg-slate-50 text-slate-900'
+        }`}
+      >
+        {/* Full Page Sticky Top Bar */}
+        <div className={`sticky top-0 z-40 w-full px-4 py-3 flex items-center justify-between border-b backdrop-blur-2xl transition-colors ${
+          darkMode 
+            ? 'bg-[#090c15]/85 border-zinc-800/80 text-white' 
+            : 'bg-white/85 border-slate-200/80 text-slate-900'
+        }`}>
           <button
             onClick={() => {
               triggerHaptic('light');
               onClose();
             }}
-            className="absolute top-4 right-4 z-20 p-2.5 rounded-full bg-slate-950/70 text-white hover:bg-slate-950 backdrop-blur-md transition-all shadow-lg"
-            aria-label="Close"
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-2xl font-black text-xs transition border active:scale-95 ${
+              darkMode 
+                ? 'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border-zinc-800' 
+                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs'
+            }`}
           >
-            <X className="w-5 h-5" />
+            <ArrowLeft className="w-4 h-4 text-red-500" />
+            <span>Back</span>
           </button>
 
-          {/* Banner Hero Image */}
-          <div className="relative h-64 sm:h-72 w-full overflow-hidden bg-slate-950">
-            <img
-              src={movie.banner_url || movie.thumbnail_url}
-              alt={movie.title}
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover filter brightness-95"
-            />
-            <div className={`absolute inset-0 ${
-              darkMode 
-                ? 'bg-gradient-to-t from-slate-900 via-slate-900/50 to-transparent' 
-                : 'bg-gradient-to-t from-white via-white/50 to-transparent'
-            }`} />
+          <h2 className="font-extrabold text-sm truncate max-w-[200px] text-center font-heading">
+            {movie.title}
+          </h2>
 
-            {/* Title Overlay */}
-            <div className="absolute bottom-4 left-6 right-6">
-              <span className="inline-block px-3 py-1 mb-2 rounded-full text-xs font-bold badge-red shadow-md">
-                {movie.genre}
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight font-heading text-slate-900 dark:text-white drop-shadow-md">
+          <div className="w-16" /> {/* Balance layout flex spacer */}
+        </div>
+
+        {/* Full Page Content Body */}
+        <div className="flex-1 max-w-3xl mx-auto w-full p-4 sm:p-6 space-y-6 pb-16">
+          
+          {/* Hero Banner Backdrop */}
+          <div className="relative w-full rounded-3xl overflow-hidden shadow-2xl border border-zinc-800/50 aspect-[16/9] bg-slate-950">
+            <img
+              src={movie.backdrop_url || movie.banner_url || movie.poster_url || movie.thumbnail_url}
+              alt={movie.title}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                e.target.src = movie.thumbnail_url || 'https://images.unsplash.com/photo-153444677768-be436bb09401?q=80&w=800&auto=format&fit=crop';
+              }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />
+            
+            {/* Rating Tag */}
+            <div className="absolute top-3 right-3 flex items-center gap-1 px-3 py-1 rounded-full bg-slate-950/80 text-amber-400 text-xs font-black backdrop-blur-md border border-white/10 shadow-md">
+              <Star className="w-3.5 h-3.5 fill-amber-400" />
+              <span>{movie.rating || '8.8'}</span>
+            </div>
+
+            {/* Title & Category Tag on Hero */}
+            <div className="absolute bottom-4 left-4 right-4 text-white">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-600 text-white shadow-md shadow-red-600/40">
+                  {movie.genre || 'Cinema'}
+                </span>
+                <span className="text-xs font-bold text-slate-300">{movie.year || '2026'}</span>
+              </div>
+              <h1 className="text-xl sm:text-3xl font-black font-heading leading-tight drop-shadow-md text-white">
                 {movie.title}
-              </h2>
+              </h1>
             </div>
           </div>
 
-          {/* Details & Specs Body */}
-          <div className="p-6">
-            
-            {/* Specs Bar */}
-            <div className="flex flex-wrap items-center gap-3 text-xs font-bold mb-4 pb-4 border-b border-slate-200 dark:border-slate-800">
-              <div className="flex items-center gap-1 text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-lg">
-                <Star className="w-4 h-4 fill-amber-500" />
-                <span>{movie.rating} / 10 IMDb</span>
-              </div>
-
-              {/* Exact Scraped Duration Badge */}
-              <div className="flex items-center gap-1.5 text-slate-900 dark:text-white font-extrabold bg-red-500/10 border border-red-500/30 px-3 py-1 rounded-lg">
+          {/* Quick Meta Pills & Primary Action */}
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${
+                darkMode ? 'bg-zinc-900/80 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700 shadow-xs'
+              }`}>
                 <Clock className="w-4 h-4 text-red-500" />
                 <span>{exactDuration}</span>
               </div>
 
-              <div className="flex items-center gap-1 text-slate-600 dark:text-slate-400">
-                <Calendar className="w-4 h-4" />
-                <span>{movie.year}</span>
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${
+                darkMode ? 'bg-zinc-900/80 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700 shadow-xs'
+              }`}>
+                <Calendar className="w-4 h-4 text-amber-500" />
+                <span>Released {movie.release_year || movie.year || '2026'}</span>
+              </div>
+
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${
+                darkMode ? 'bg-zinc-900/80 border-zinc-800 text-emerald-400' : 'bg-white border-slate-200 text-emerald-600 shadow-xs'
+              }`}>
+                <Sparkles className="w-4 h-4" />
+                <span>Ultra HD 1080p</span>
               </div>
             </div>
 
-            {/* Dynamic Multi-Quality Download Selector (720p, 1080p, etc.) */}
-            <div className="mb-5">
-              <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mb-2.5">
-                <Download className="w-4 h-4 text-red-500" />
-                DIRECT FILE DOWNLOADS ({sources.length} QUALITIES):
-              </p>
-              
-              <div className="space-y-2">
-                {sources.map((item, index) => (
-                  <div 
-                    key={index} 
-                    className="flex items-center justify-between bg-slate-100 dark:bg-slate-800/90 p-3 rounded-2xl border border-slate-200 dark:border-slate-700/80 hover:border-red-500/30 transition-all shadow-xs"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2 rounded-xl bg-red-500/10 text-red-500">
-                        <Video className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="font-extrabold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                          <span>{item.quality || '1080p'}</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-mono font-bold">
-                            {item.file_size || '1.2 GB'}
-                          </span>
-                        </div>
-                        <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 font-mono truncate max-w-[180px] sm:max-w-xs">
-                          https://tgstream.smd-prime.workers.dev/?id={item.drive_file_id || movie.file_id}
-                        </div>
-                      </div>
-                    </div>
+            {/* Primary Play Button */}
+            {sortedSources.length > 0 ? (
+              <button
+                onClick={() => handlePlayClick(sortedSources[0])}
+                className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-red-600 via-red-500 to-rose-600 hover:brightness-110 text-white font-black text-sm py-4 px-6 rounded-2xl shadow-xl shadow-red-600/35 border border-red-400/30 transition active:scale-[0.98]"
+              >
+                <Play className="w-5 h-5 fill-white ml-0.5" />
+                <span>Play Movie ({sortedSources[0]?.quality || '1080p HD'})</span>
+              </button>
+            ) : (
+              <div className={`w-full text-center py-4 text-xs font-bold rounded-2xl border ${
+                darkMode ? 'bg-zinc-900 text-zinc-400 border-zinc-800' : 'bg-slate-100 text-slate-600 border-slate-200'
+              }`}>
+                {loadingSources ? 'Loading stream options...' : 'Stream unavailable'}
+              </div>
+            )}
+          </div>
 
+          {/* Synopsis Section */}
+          <div className={`space-y-2 p-5 rounded-2xl border ${
+            darkMode ? 'bg-zinc-900/50 border-zinc-800/80 text-zinc-300' : 'bg-white border-slate-200 text-slate-700 shadow-xs'
+          }`}>
+            <h3 className={`text-xs font-black uppercase tracking-wider ${
+              darkMode ? 'text-zinc-400' : 'text-slate-500'
+            }`}>
+              Synopsis
+            </h3>
+            <p className="text-xs sm:text-sm leading-relaxed font-medium">
+              {movie.overview || movie.description || 'Enjoy seamless high definition streaming with multi-audio and subtitle support.'}
+            </p>
+          </div>
+
+          {/* Clean Quality & Stream Options List (No SUID or Technical Labels) */}
+          <div className="space-y-3">
+            <h3 className={`text-xs font-black uppercase tracking-wider flex items-center gap-2 ${
+              darkMode ? 'text-zinc-400' : 'text-slate-600'
+            }`}>
+              <Film className="w-4 h-4 text-red-500" />
+              <span>Available Qualities ({sortedSources.length})</span>
+            </h3>
+
+            <div className="space-y-2.5">
+              {sortedSources.map((src, index) => (
+                <div
+                  key={src.id || index}
+                  className={`flex items-center justify-between p-4 rounded-2xl border transition ${
+                    darkMode 
+                      ? 'bg-zinc-900/80 hover:bg-zinc-800/90 border-zinc-800 text-zinc-200' 
+                      : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-900 shadow-xs'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="px-3 py-1 text-xs font-black bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-xl shadow-xs">
+                      {src.quality || '1080p'}
+                    </span>
+                    <div>
+                      <p className="text-xs font-extrabold">{src.file_size || '1.5 GB'}</p>
+                      <p className="text-[10px] font-semibold text-slate-400 dark:text-zinc-400">
+                        High Quality Direct Stream
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => handleDownloadClick(item)}
-                      className="bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-extrabold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-md shadow-red-600/30 transition-all"
+                      onClick={() => handlePlayClick(src)}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-extrabold rounded-xl transition shadow-md shadow-red-600/30 flex items-center gap-1.5 active:scale-95"
                     >
-                      {downloadingQuality === item.quality ? (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
-                          <span>Downloading...</span>
-                        </>
+                      <Play className="w-3.5 h-3.5 fill-white" />
+                      <span>Stream</span>
+                    </button>
+                    
+                    <button
+                      onClick={() => handleDownloadClick(src)}
+                      className={`p-2.5 rounded-xl transition ${
+                        darkMode 
+                          ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white' 
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900'
+                      }`}
+                      title="Download Movie"
+                    >
+                      {downloadingQuality === src.quality ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 animate-pulse" />
                       ) : (
-                        <>
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Download</span>
-                        </>
+                        <Download className="w-4 h-4" />
                       )}
                     </button>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-
-            {/* Story Overview */}
-            <div className="mb-6">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-                Synopsis
-              </h3>
-              <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300 font-medium">
-                {movie.description}
-              </p>
-            </div>
-
-            {/* Cloudflare Direct Attachment Endpoint Info Pill */}
-            <div className="mb-6 p-3 rounded-2xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 text-xs font-mono">
-              <div className="flex items-center justify-between gap-2 text-slate-500 dark:text-slate-400 mb-1 font-sans font-semibold">
-                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                  <ShieldCheck className="w-4 h-4" />
-                  Cloudflare Direct File Attachment Proxy
-                </span>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full font-bold">
-                  DIRECT DL
-                </span>
-              </div>
-              <p className="truncate text-[11px] text-slate-600 dark:text-slate-300">
-                {streamUrl}
-              </p>
-            </div>
-
-            {/* Main Action Buttons */}
-            <div className="pt-2">
-              <button
-                onClick={handlePlayClick}
-                className="w-full py-3.5 px-6 rounded-2xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-red-600/30 transition-all"
-              >
-                <Play className="w-5 h-5 fill-current" />
-                <span>Stream Now in HD ({sources[0]?.quality || '1080p'})</span>
-              </button>
-            </div>
-
           </div>
-        </motion.div>
-      </div>
+
+          {/* Clean Consumer Security & Quality Badge */}
+          <div className={`flex items-center gap-2.5 p-4 rounded-2xl border text-xs font-semibold ${
+            darkMode ? 'bg-zinc-900/60 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700 shadow-xs'
+          }`}>
+            <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            <span>Encrypted Direct Stream • Ultra HD Playback Ready</span>
+          </div>
+
+        </div>
+      </motion.div>
     </AnimatePresence>
   );
 }

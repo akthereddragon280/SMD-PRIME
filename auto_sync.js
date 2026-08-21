@@ -8,7 +8,7 @@ dotenv.config();
 // Config
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://iwulcblngplsjtsipods.supabase.co';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3dWxjYmxuZ3Bsc2p0c2lwb2RzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzA0MTA2MywiZXhwIjoyMTAyNjE3MDYzfQ.X61a2cj17Zs8Q-0-Pe1ku1PMi_uiybIlYFLv61d8tDU';
-const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '19FJzU-ZrwOOVOmxginGpBMo3YQC1swXM';
+const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '13QLJomTi-5IA4Jjz7TOMSEKwalE6mSCt';
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 'tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com';
 const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || `-----BEGIN PRIVATE KEY-----
 MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDH/ZrgLW4U9Bhi
@@ -82,6 +82,56 @@ async function getGoogleDriveAccessToken() {
   }
 }
 
+function parseAndSanitizeFileName(fullName, fileSizeInBytes) {
+  let name = fullName.trim();
+  name = name.replace(/\.(mkv|mp4|avi|mov|flv|webm)$/i, '');
+  name = name.replace(/^Copy\s*(\(\d+\))?\s*of\s+/i, '');
+  name = name.replace(/^@[A-Za-z0-9_.\s]+?[-:]\s*/i, ''); 
+  name = name.replace(/^@[A-Za-z0-9_.\s]{2,40}\s{2,}/i, '');
+  name = name.replace(/^@[A-Za-z0-9_.]+\s*/i, '');
+  name = name.replace(/^(https?:\/\/)?(www\.)?[A-Za-z0-9.-]+\.[A-Za-z]{2,6}(\.[A-Za-z]{2,4})?\s*[-:_]*\s*/i, '');
+
+  const yearMatch = name.match(/\b(19\d\d|20[0-3]\d)\b/);
+  const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
+
+  let quality = '1080p';
+  if (/(2160p|4K)/i.test(fullName)) quality = '4K';
+  else if (/1080p/i.test(fullName)) quality = '1080p';
+  else if (/720p/i.test(fullName)) quality = '720p';
+  else if (/480p/i.test(fullName)) quality = '480p';
+
+  const audioLangs = [];
+  if (/tam|tamil/i.test(fullName)) audioLangs.push('Tam');
+  if (/tel|telugu/i.test(fullName)) audioLangs.push('Tel');
+  if (/hin|hindi/i.test(fullName)) audioLangs.push('Hin');
+  if (/eng|english/i.test(fullName)) audioLangs.push('Eng');
+  if (audioLangs.length === 0) audioLangs.push('Tam', 'Tel', 'Hin', 'Eng');
+
+  let cleanTitle = name;
+  if (yearMatch) {
+    cleanTitle = cleanTitle.substring(0, yearMatch.index);
+  } else {
+    cleanTitle = cleanTitle.replace(/\b(2160p|4K|1080p|720p|480p|HDRip|WEB-DL|BluRay|BRRip|DVDRip|HQ|x264|x265|HEVC)\b.*/i, '');
+  }
+
+  cleanTitle = cleanTitle
+    .replace(/\[.*?\]/g, '')
+    .replace(/\(.*?\)/g, '')
+    .replace(/\b(BluRay|HDRp|HQ|HDRip|WEB-DL|HDR|x264|x265|HEVC|DD\+5\.1|ESub|MSub|AAC|Tamil|Tam|Tel|Hin|Eng|TRUE|S\d+|^EP.*)\b/gi, '')
+    .replace(/[-_.:()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  cleanTitle = cleanTitle.replace(/^(promo|vip|official|hd|hq)\s+/i, '').trim();
+
+  if (!cleanTitle || cleanTitle.length < 2) {
+    cleanTitle = fullName.replace(/\.(mkv|mp4|avi)$/i, '').replace(/[-_]/g, ' ').trim();
+  }
+
+  const uid = `${cleanTitle.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${year || 2026}`;
+  return { cleanTitle, year, quality, audioLangs, uid };
+}
+
 async function runAutoSyncPass() {
   console.log(`[${new Date().toLocaleTimeString()}] ⚡ Checking Google Drive Folder (${FOLDER_ID}) for new uploads...`);
 
@@ -98,23 +148,8 @@ async function runAutoSyncPass() {
     const files = data.files.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
 
     for (const file of files) {
-      const yearMatch = file.name.match(/\((\d{4})\)/);
-      const year = yearMatch ? parseInt(yearMatch[1], 10) : 2026;
-
-      let quality = '1080p';
-      if (file.name.includes('720p')) quality = '720p';
-      else if (file.name.includes('480p')) quality = '480p';
-      else if (file.name.includes('2160p') || file.name.includes('4K')) quality = '4K';
-
-      let cleanTitle = file.name
-        .replace(/www\.\w+\.\w+/g, '')
-        .replace(/\(\d{4}\).*/, '')
-        .replace(/\b(BluRay|HDRp|HQ|HDRip|WEB-DL|HDR|x264|x265|HEVC|DD\+5\.1|ESub|AAC|Tamil|Tam|Tel|Hin|Eng|mkv|mp4|avi)\b/gi, '')
-        .replace(/\[.*?\]/g, '')
-        .replace(/[-_.]/g, ' ')
-        .trim();
-
-      const uid = `${cleanTitle.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${year}`;
+      const rawSizeBytes = Number(file.size) || 0;
+      const { cleanTitle, year, quality, audioLangs, uid } = parseAndSanitizeFileName(file.name, rawSizeBytes);
 
       const tmdb = await fetchAuthenticTMDBMetadata(cleanTitle, year);
 
@@ -126,7 +161,7 @@ async function runAutoSyncPass() {
         overview: tmdb.overview,
         poster_url: tmdb.poster_url,
         backdrop_url: tmdb.backdrop_url,
-        release_year: tmdb.release_year || year,
+        release_year: tmdb.release_year || year || 2026,
         rating: tmdb.rating,
         genres: tmdb.genres
       }, { onConflict: 'uid' });
@@ -136,13 +171,13 @@ async function runAutoSyncPass() {
         movie_uid: uid,
         quality,
         drive_file_id: file.id,
-        file_size: file.size ? `${Math.round(file.size / (1024 * 1024))} MB` : 'Unknown',
-        audio_languages: ['Tam', 'Tel', 'Hin', 'Eng'],
+        file_size: rawSizeBytes > 0 ? `${Math.round(rawSizeBytes / (1024 * 1024))} MB` : '1.2 GB',
+        audio_languages: audioLangs,
         sa_account_index: 1
       }, { onConflict: 'movie_uid, quality' });
     }
 
-    console.log(`[${new Date().toLocaleTimeString()}] ✅ Sync Pass Complete! (${files.length} files active in Supabase with TMDB metadata)`);
+    console.log(`[${new Date().toLocaleTimeString()}] ✅ Auto-Sync Complete! (${files.length} clean file(s) synchronized with Supabase)`);
   } catch (err) {
     console.error('Auto sync error:', err.message);
   }

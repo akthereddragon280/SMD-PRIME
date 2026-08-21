@@ -17,30 +17,34 @@ export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode }) {
   };
 
   return (
-    <div className="relative w-full overflow-hidden rounded-3xl my-4 border shadow-xl transition-all duration-300 border-slate-200/80 dark:border-slate-800">
+    <div className={`relative w-full overflow-hidden rounded-3xl my-4 border shadow-2xl transition-all duration-300 ${
+      darkMode 
+        ? 'border-zinc-800/80 shadow-black/80' 
+        : 'border-slate-200/90 shadow-slate-300/60'
+    }`}>
       
       {/* Background Banner Image */}
-      <div className="relative h-[360px] sm:h-[420px] w-full overflow-hidden bg-slate-900">
+      <div className="relative h-[380px] sm:h-[430px] w-full overflow-hidden bg-slate-950">
         <img
           src={movie.banner_url || movie.thumbnail_url}
           alt={movie.title}
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover object-center scale-105 filter brightness-95 dark:brightness-75 transition-all duration-700"
+          className="w-full h-full object-cover object-center scale-105 filter brightness-100 dark:brightness-75 transition-all duration-700"
           loading="eager"
         />
 
-        {/* Dynamic Light/Dark Gradient Overlays for high legibility */}
+        {/* Dynamic Light/Dark Gradient Overlays for High Legibility */}
         <div className={`absolute inset-0 ${
           darkMode 
-            ? 'bg-gradient-to-t from-slate-950 via-slate-950/60 to-transparent' 
-            : 'bg-gradient-to-t from-slate-50 via-slate-50/70 to-slate-900/20'
+            ? 'bg-gradient-to-t from-[#0c0f18] via-[#0c0f18]/70 via-40% to-transparent' 
+            : 'bg-gradient-to-t from-slate-900/90 via-slate-900/40 via-50% to-transparent'
         }`} />
         
-        <div className="absolute inset-0 bg-gradient-to-r from-slate-950/80 via-slate-950/30 to-transparent dark:from-slate-950/90 dark:via-slate-950/60" />
+        <div className="absolute inset-0 bg-gradient-to-r from-slate-950/90 via-slate-950/40 to-transparent" />
       </div>
 
       {/* Featured Content Overlay */}
-      <div className="absolute bottom-0 left-0 right-0 p-5 sm:p-8 flex flex-col justify-end text-white dark:text-white">
+      <div className="absolute bottom-0 left-0 right-0 p-5 sm:p-8 flex flex-col justify-end text-white">
         
         {/* Featured Tag */}
         <motion.div 
@@ -49,11 +53,11 @@ export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode }) {
           transition={{ duration: 0.4 }}
           className="flex items-center gap-2 mb-2"
         >
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-600 text-white shadow-md shadow-red-600/30">
-            <Sparkles className="w-3 h-3 fill-current" />
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg shadow-red-600/40 border border-red-400/30">
+            <Sparkles className="w-3 h-3 fill-current animate-pulse" />
             FEATURED BLOCKBUSTER
           </span>
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white/20 dark:bg-slate-800/80 backdrop-blur-md border border-white/30 text-white">
+          <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-white/20 backdrop-blur-md border border-white/30 text-white shadow-xs">
             {movie.genre}
           </span>
         </motion.div>
@@ -63,7 +67,7 @@ export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode }) {
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.1 }}
-          className="text-2xl sm:text-4xl font-extrabold tracking-tight font-heading leading-tight drop-shadow-md text-white"
+          className="text-2xl sm:text-4xl font-black tracking-tight font-heading leading-tight drop-shadow-lg text-white"
         >
           {movie.title}
         </motion.h1>
@@ -75,17 +79,17 @@ export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode }) {
           transition={{ duration: 0.5, delay: 0.15 }}
           className="flex items-center gap-3 my-3 text-xs sm:text-sm font-semibold text-slate-200"
         >
-          <div className="flex items-center gap-1 text-amber-400 font-bold bg-slate-950/60 px-2 py-0.5 rounded-md backdrop-blur-xs">
+          <div className="flex items-center gap-1 text-amber-400 font-extrabold bg-black/60 px-2.5 py-0.5 rounded-lg backdrop-blur-md border border-white/10 shadow-xs">
             <Star className="w-3.5 h-3.5 fill-amber-400" />
-            <span>{movie.rating}</span>
+            <span>{movie.rating || '8.8'}</span>
           </div>
-          <span>•</span>
-          <div className="flex items-center gap-1 text-slate-300">
-            <Clock className="w-3.5 h-3.5" />
+          <span className="text-slate-400">•</span>
+          <div className="flex items-center gap-1 text-slate-200 font-bold">
+            <Clock className="w-3.5 h-3.5 text-red-500" />
             <span>{movie.duration}</span>
           </div>
-          <span>•</span>
-          <span className="text-slate-300">{movie.year}</span>
+          <span className="text-slate-400">•</span>
+          <span className="text-slate-200 font-bold">{movie.year}</span>
         </motion.div>
 
         {/* Plot Description */}
@@ -93,7 +97,7 @@ export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode }) {
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="text-xs sm:text-sm text-slate-200 line-clamp-2 max-w-xl mb-5 font-medium leading-relaxed drop-shadow-xs"
+          className="text-xs sm:text-sm text-slate-200 line-clamp-2 max-w-xl mb-5 font-medium leading-relaxed drop-shadow-sm"
         >
           {movie.description}
         </motion.p>
@@ -108,16 +112,16 @@ export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode }) {
           {/* Play Stream Button */}
           <button
             onClick={handlePlayClick}
-            className="flex-1 sm:flex-initial px-6 py-3 rounded-2xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-red-600/30 transition-all duration-200"
+            className="flex-1 sm:flex-initial px-6 py-3 rounded-2xl bg-gradient-to-r from-red-600 via-red-500 to-rose-600 hover:brightness-110 active:scale-95 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl shadow-red-600/40 border border-red-400/40 transition-all duration-200"
           >
-            <Play className="w-4 h-4 fill-current" />
+            <Play className="w-4 h-4 fill-current ml-0.5" />
             <span>Play Now</span>
           </button>
 
           {/* Details Button */}
           <button
             onClick={handleInfoClick}
-            className="px-5 py-3 rounded-2xl bg-white/20 hover:bg-white/30 active:scale-95 text-white font-bold text-sm flex items-center justify-center gap-2 backdrop-blur-md border border-white/30 transition-all duration-200"
+            className="px-5 py-3 rounded-2xl bg-white/20 hover:bg-white/30 active:scale-95 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 backdrop-blur-xl border border-white/30 shadow-lg transition-all duration-200"
           >
             <Info className="w-4 h-4" />
             <span>Details</span>
