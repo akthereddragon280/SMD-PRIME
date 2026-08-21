@@ -14,18 +14,42 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://iwulcblngplsjtsipods.s
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3dWxjYmxuZ3Bsc2p0c2lwb2RzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzA0MTA2MywiZXhwIjoyMTAyNjE3MDYzfQ.X61a2cj17Zs8Q-0-Pe1ku1PMi_uiybIlYFLv61d8tDU';
 const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '13QLJomTi-5IA4Jjz7TOMSEKwalE6mSCt';
 
-const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+function getServiceAccountList() {
+  const list = [];
+  for (let i = 1; i <= 10; i++) {
+    const email = process.env[`GOOGLE_SA${i}_EMAIL`];
+    const key = process.env[`GOOGLE_SA${i}_PRIVATE_KEY`];
+    if (email && key) {
+      list.push({ email, private_key: key.replace(/\\n/g, '\n') });
+    }
+  }
+  if (list.length === 0 && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
+    list.push({
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    });
+  }
+  return list;
+}
+
+const SERVICE_ACCOUNTS = getServiceAccountList();
+let saIndex = 0;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // 2. Generate Google Drive Access Token
 async function getGoogleDriveAccessToken() {
   try {
+    const sa = SERVICE_ACCOUNTS[saIndex % SERVICE_ACCOUNTS.length] || {
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      private_key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n')
+    };
+    saIndex++;
+
     const header = { alg: 'RS256', typ: 'JWT' };
     const now = Math.floor(Date.now() / 1000);
     const payload = {
-      iss: GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      iss: sa.email,
       scope: 'https://www.googleapis.com/auth/drive.readonly',
       aud: 'https://oauth2.googleapis.com/token',
       exp: now + 3600,
@@ -40,7 +64,7 @@ async function getGoogleDriveAccessToken() {
     const signatureInput = `${base64UrlEncode(header)}.${base64UrlEncode(payload)}`;
     const signer = crypto.createSign('RSA-SHA256');
     signer.update(signatureInput);
-    const signature = signer.sign(GOOGLE_PRIVATE_KEY, 'base64')
+    const signature = signer.sign(sa.private_key, 'base64')
       .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 
     const jwt = `${signatureInput}.${signature}`;
@@ -123,22 +147,30 @@ function parseAndSanitizeFileName(fullName, fileSizeInBytes) {
   const yearMatch = name.match(/\b(19\d\d|20[0-3]\d)\b/);
   const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
 
-  // Step G: Extract Video Quality (Explicit tags or Size-based fallback)
-  let quality = null;
-  if (/(2160p|4K)/i.test(fullName)) quality = '4K';
-  else if (/1080p/i.test(fullName)) quality = '1080p';
-  else if (/720p/i.test(fullName)) quality = '720p';
-  else if (/480p/i.test(fullName)) quality = '480p';
+  // Step G: Advanced Quality & Codec Detection (e.g. 1080p HEVC, 4K HEVC, 720p x264)
+  let codec = null;
+  if (/(hevc|x265|h\.?265)/i.test(fullName)) codec = 'HEVC';
+  else if (/av1/i.test(fullName)) codec = 'AV1';
+  else if (/(x264|h\.?264|avc)/i.test(fullName)) codec = 'x264';
+  else if (/(10bit|10-bit)/i.test(fullName)) codec = '10Bit';
+
+  let baseQuality = null;
+  if (/(2160p|4K)/i.test(fullName)) baseQuality = '4K';
+  else if (/1080p/i.test(fullName)) baseQuality = '1080p';
+  else if (/720p/i.test(fullName)) baseQuality = '720p';
+  else if (/480p/i.test(fullName)) baseQuality = '480p';
   else {
     const sizeInMB = Number(fileSizeInBytes) > 0 ? Number(fileSizeInBytes) / (1024 * 1024) : 0;
     if (sizeInMB > 0) {
-      if (sizeInMB < 600) quality = '480p';
-      else if (sizeInMB >= 600 && sizeInMB < 1800) quality = '720p';
-      else quality = '1080p';
+      if (sizeInMB < 600) baseQuality = '480p';
+      else if (sizeInMB >= 600 && sizeInMB < 1800) baseQuality = '720p';
+      else baseQuality = '1080p';
     } else {
-      quality = '1080p';
+      baseQuality = '1080p';
     }
   }
+
+  const quality = codec ? `${baseQuality} ${codec}` : baseQuality;
 
   // Step H: Extract Audio Codecs & Languages
   const audioLangs = [];

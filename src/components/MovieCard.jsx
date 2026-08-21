@@ -56,6 +56,13 @@ export default function MovieCard({ movie, onSelectMovie, onPlay, darkMode }) {
           <span>{movie.rating || '8.8'}</span>
         </div>
 
+        {/* Dynamic Quality / Codec Badge */}
+        {movie.sources && movie.sources.length > 0 && movie.sources[0]?.quality && (
+          <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-zinc-950/85 text-emerald-400 border border-emerald-500/30 text-[9px] font-black uppercase tracking-wider backdrop-blur-xs shadow-xs">
+            {movie.sources[0].quality}
+          </div>
+        )}
+
         {/* Hot / Trending badge */}
         {movie.trending && (
           <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-gradient-to-r from-red-600 to-rose-600 text-white text-[9px] font-black uppercase tracking-wider shadow-md shadow-red-600/30">
