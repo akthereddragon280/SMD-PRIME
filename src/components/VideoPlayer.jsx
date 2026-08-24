@@ -1231,21 +1231,18 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                         initial={{ opacity: 0, y: 10, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute bottom-12 right-0 w-72 p-3 rounded-2xl bg-zinc-950/95 border border-white/10 shadow-2xl backdrop-blur-2xl z-50 space-y-2"
+                        className="absolute bottom-12 right-0 w-64 p-3 rounded-2xl bg-zinc-950/95 border border-white/10 shadow-2xl backdrop-blur-2xl z-50 space-y-1.5"
                       >
-                        <div className="flex items-center justify-between pb-1 border-b border-white/10">
-                          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-amber-400 flex items-center gap-1">
-                            <Tv className="w-3.5 h-3.5" />
-                            External Players
-                          </span>
+                        <div className="flex items-center justify-end pb-1 border-b border-white/10">
                           <button
                             onClick={() => setShowExternalMenu(false)}
-                            className="text-zinc-500 hover:text-white p-0.5 rounded-lg"
+                            className="text-zinc-400 hover:text-white p-0.5 rounded-lg flex items-center gap-1 text-[10px] font-mono"
                           >
+                            <span>Close</span>
                             <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
-                        <ExternalPlayerMenu streamUrl={activeVideoUrl} movieTitle={movieTitle} />
+                        <ExternalPlayerMenu streamUrl={activeVideoUrl} movieTitle={movieTitle} variant="compact" />
                       </motion.div>
                     )}
                   </AnimatePresence>

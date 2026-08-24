@@ -13,7 +13,7 @@ import { triggerHaptic } from '../utils/telegram';
  * 2. MX Player: `intent:<streamUrl>#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end;`
  * 3. System Default: `intent:<streamUrl>#Intent;action=android.intent.action.VIEW;type=video/*;end;`
  */
-export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stream' }) {
+export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stream', variant = 'default' }) {
   const [isOpen, setIsOpen] = useState(false);
 
   if (!streamUrl) return null;
@@ -33,6 +33,57 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
   const handlePlayerClick = (playerName) => {
     triggerHaptic('medium');
   };
+
+  // Compact Variant for Micro Popovers (Horizontal 3-Logo Layout)
+  if (variant === 'compact') {
+    return (
+      <div className="w-full space-y-2.5 font-sans">
+        <div className="text-[10px] font-mono font-black uppercase tracking-widest text-amber-400 text-center">
+          PLAY WITH
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {/* 1. VLC Player */}
+          <a
+            href={vlcUrl}
+            onClick={() => handlePlayerClick('VLC')}
+            className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all active:scale-95 group shadow-lg"
+            title="Play in VLC Player"
+          >
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center font-black text-amber-400 text-xs shadow-inner group-hover:scale-105 transition-transform">
+              VLC
+            </div>
+            <span className="text-[10px] font-extrabold text-white mt-1.5 group-hover:text-amber-300">VLC</span>
+          </a>
+
+          {/* 2. MX Player */}
+          <a
+            href={mxPlayerUrl}
+            onClick={() => handlePlayerClick('MX Player')}
+            className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 transition-all active:scale-95 group shadow-lg"
+            title="Play in MX Player"
+          >
+            <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center font-black text-blue-400 text-xs shadow-inner group-hover:scale-105 transition-transform">
+              MX
+            </div>
+            <span className="text-[10px] font-extrabold text-white mt-1.5 group-hover:text-blue-300">MX Player</span>
+          </a>
+
+          {/* 3. System Default */}
+          <a
+            href={systemDefaultUrl}
+            onClick={() => handlePlayerClick('System Default')}
+            className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 transition-all active:scale-95 group shadow-lg"
+            title="Play in System Default Player"
+          >
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center font-black text-emerald-400 text-xs shadow-inner group-hover:scale-105 transition-transform">
+              SYS
+            </div>
+            <span className="text-[10px] font-extrabold text-white mt-1.5 group-hover:text-emerald-300">Default</span>
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full space-y-3 font-sans">
