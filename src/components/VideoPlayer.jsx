@@ -46,6 +46,30 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   // Brightness Control State
   const [brightness, setBrightness] = useState(100);
 
+  // Graceful Handoff External Playing State
+  const [isExternalPlaying, setIsExternalPlaying] = useState(false);
+
+  const handleExternalPlayTriggered = () => {
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch (e) {}
+    }
+    setIsPlaying(false);
+    setIsExternalPlaying(true);
+    setShowExternalMenu(false);
+    setShowSettingsModal(false);
+  };
+
+  const handleResumeInApp = () => {
+    setIsExternalPlaying(false);
+    if (videoRef.current) {
+      try {
+        videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      } catch (e) {}
+    }
+  };
+
   // Master Settings UI State
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsTab, setSettingsTab] = useState('main'); // 'main' | 'quality' | 'audio' | 'subtitles' | 'speed'
@@ -1269,7 +1293,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                             <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
-                        <ExternalPlayerMenu streamUrl={activeVideoUrl} movieTitle={movieTitle} variant="compact" />
+                        <ExternalPlayerMenu streamUrl={activeVideoUrl} movieTitle={movieTitle} variant="compact" onExternalPlayTriggered={handleExternalPlayTriggered} />
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1288,6 +1312,32 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Graceful Handoff External Playing Overlay */}
+        {isExternalPlaying && (
+          <div className="absolute inset-0 z-45 bg-zinc-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-6 text-center space-y-5 animate-fadeIn select-none">
+            <div className="w-20 h-20 rounded-3xl bg-red-600/10 border border-red-500/30 flex items-center justify-center shadow-[0_0_50px_rgba(239,68,68,0.25)]">
+              <Tv className="w-10 h-10 text-red-500 animate-pulse" />
+            </div>
+
+            <div className="space-y-1.5 max-w-xs">
+              <h3 className="text-lg font-black text-white tracking-tight font-heading">
+                Playing in External Player
+              </h3>
+              <p className="text-xs font-mono text-zinc-400 leading-relaxed">
+                Stream handed off to native app (VLC / MX Player). Hardware decoder paused in app.
+              </p>
+            </div>
+
+            <button
+              onClick={handleResumeInApp}
+              className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-xs tracking-wider uppercase shadow-xl shadow-red-600/35 active:scale-95 transition-all flex items-center gap-2"
+            >
+              <Play className="w-4 h-4 fill-current" />
+              <span>Resume Playback in App</span>
+            </button>
+          </div>
+        )}
 
       </motion.div>
     </AnimatePresence>

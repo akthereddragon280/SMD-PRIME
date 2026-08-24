@@ -86,7 +86,7 @@ export function generatePlayerUrls(streamUrl) {
  * Bypasses Telegram Mini App hardware & browser decoding limitations by routing 
  * direct stream URLs into native Android / iOS external video player apps or copying link.
  */
-export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stream', variant = 'default' }) {
+export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stream', variant = 'default', onExternalPlayTriggered }) {
   const [copied, setCopied] = useState(false);
 
   if (!streamUrl) return null;
@@ -103,16 +103,24 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
     const rawStreamUrl = urls.raw;
     if (!rawStreamUrl) return;
 
-    // HTTPS Bounce Gateway URL to escape TMA WebView Sandbox
-    const gatewayUrl = `${window.location.origin}/player-gate?app=${encodeURIComponent(playerType)}&url=${encodeURIComponent(rawStreamUrl)}`;
-
-    if (window.Telegram?.WebApp?.openLink) {
-      // Use Telegram WebApp API to open HTTPS gateway in external system browser (Chrome/Safari)
-      window.Telegram.WebApp.openLink(gatewayUrl);
-    } else {
-      // Standard browser popup fallback
-      window.open(gatewayUrl, '_blank');
+    // 1. Instantly trigger parent callback to pause HTML5 video & release hardware video decoder
+    if (typeof onExternalPlayTriggered === 'function') {
+      onExternalPlayTriggered();
     }
+
+    // 2. Wait ~300ms for OS & browser to cleanly release hardware decoder resources
+    setTimeout(() => {
+      // HTTPS Bounce Gateway URL to escape TMA WebView Sandbox
+      const gatewayUrl = `${window.location.origin}/player-gate?app=${encodeURIComponent(playerType)}&url=${encodeURIComponent(rawStreamUrl)}`;
+
+      if (window.Telegram?.WebApp?.openLink) {
+        // Use Telegram WebApp API to open HTTPS gateway in external system browser (Chrome/Safari)
+        window.Telegram.WebApp.openLink(gatewayUrl);
+      } else {
+        // Standard browser popup fallback
+        window.open(gatewayUrl, '_blank');
+      }
+    }, 300);
   };
 
   const handleCopyLink = (e) => {
