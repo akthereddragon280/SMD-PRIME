@@ -3,7 +3,8 @@ import {
   ArrowLeft, Settings, Play, Pause, RotateCcw, RotateCw, 
   Volume2, VolumeX, Maximize, Minimize, Gauge, Sun, 
   Check, AlertCircle, FastForward, Rewind, Clock,
-  Languages, Captions, ChevronRight, X, Download
+  Languages, Captions, ChevronRight, X, Download,
+  ExternalLink, Tv
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -66,6 +67,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   // Layout, Controls Auto-Fade & Gesture Overlay
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFakeFullscreen, setIsFakeFullscreen] = useState(false);
+  const [showExternalMenu, setShowExternalMenu] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [touchFeedback, setTouchFeedback] = useState(null);
   const [gestureHUD, setGestureHUD] = useState(null); // { type: 'brightness'|'volume'|'seek', value: string|number, timeFormatted?: string }
@@ -1207,11 +1209,52 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                   </div>
                 </div>
 
-                {/* Right Controls Group (Fullscreen) */}
-                <div className="flex items-center gap-2">
+                {/* Right Controls Group (External Player Launch & Fullscreen) */}
+                <div className="flex items-center gap-2 relative">
+                  {/* Quick External Player Launcher Button */}
+                  <button
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setShowExternalMenu(!showExternalMenu);
+                    }}
+                    className="p-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-red-500/20 hover:from-amber-500/30 hover:to-red-500/30 text-amber-400 border border-amber-500/40 flex items-center gap-1.5 active:scale-95 transition-all shadow-lg backdrop-blur-md"
+                    title="Play in External App (VLC / MX Player)"
+                  >
+                    <ExternalLink className="w-4 h-4 stroke-[2.5]" />
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-300">EXT</span>
+                  </button>
+
+                  {/* Floating Micro External Player Menu */}
+                  <AnimatePresence>
+                    {showExternalMenu && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        className="absolute bottom-12 right-0 w-72 p-3 rounded-2xl bg-zinc-950/95 border border-white/10 shadow-2xl backdrop-blur-2xl z-50 space-y-2"
+                      >
+                        <div className="flex items-center justify-between pb-1 border-b border-white/10">
+                          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-amber-400 flex items-center gap-1">
+                            <Tv className="w-3.5 h-3.5" />
+                            External Players
+                          </span>
+                          <button
+                            onClick={() => setShowExternalMenu(false)}
+                            className="text-zinc-500 hover:text-white p-0.5 rounded-lg"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <ExternalPlayerMenu streamUrl={activeVideoUrl} movieTitle={movieTitle} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Fullscreen Button */}
                   <button
                     onClick={toggleFullscreen}
                     className="p-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 active:scale-95"
+                    title="Toggle Fullscreen"
                   >
                     {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                   </button>
