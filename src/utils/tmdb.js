@@ -137,7 +137,7 @@ export async function fetchAuthenticTMDBMetadata(cleanTitle, year) {
     duration: '2h 15m',
     poster_url: dynamicPoster,
     backdrop_url: dynamicPoster,
-    overview: 'High quality stream loaded live from 7TB Google Drive cloud repository.',
+    overview: 'High quality stream loaded live from SMD Prime Cloud Cinema Library.',
     genres: ['Action', 'Drama']
   };
 }

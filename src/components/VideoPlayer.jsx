@@ -2,13 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   ArrowLeft, Settings, Play, Pause, RotateCcw, RotateCw, 
   Volume2, VolumeX, Maximize, Minimize, Gauge, Sun, 
-  Check, AlertCircle, Loader2, FastForward, Rewind, Clock,
-  Languages, Captions, ChevronRight, X
+  Check, AlertCircle, FastForward, Rewind, Clock,
+  Languages, Captions, ChevronRight, X, Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase } from '../supabaseClient';
-import { getProxyStreamUrl } from '../utils/proxy';
-import { triggerHaptic, useTelegramBackButton } from '../utils/telegram';
+import { 
+  supabase, 
+  upsertMovieDuration, 
+  saveWatchProgress, 
+  logStreamAnalytics, 
+  formatDurationString 
+} from '../supabaseClient';
+import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
+import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 
 export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) {
   const videoRef = useRef(null);
@@ -23,6 +29,9 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   const [activeVideoUrl, setActiveVideoUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [videoError, setVideoError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [downloadProgress, setDownloadProgress] = useState(null);
+  const [downloading, setDownloading] = useState(false);
 
   // Playback Control States
   const [isPlaying, setIsPlaying] = useState(true);
@@ -81,8 +90,8 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   const resetControlsTimeout = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    // DO NOT auto-hide while Settings Modal is active
-    if (showSettingsModal) return;
+    // DO NOT auto-hide while Settings Modal or Loading is active
+    if (showSettingsModal || loading) return;
 
     controlsTimeoutRef.current = setTimeout(() => {
       setShowControls(false);
@@ -90,15 +99,15 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     }, 3500);
   };
 
-  // Freeze auto-fade timer when Settings Modal is open so user can comfortably select options
+  // Freeze auto-fade timer when Settings Modal or Loading is active so duration line stays visible
   useEffect(() => {
-    if (showSettingsModal) {
+    if (showSettingsModal || loading) {
       setShowControls(true);
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     } else {
       resetControlsTimeout();
     }
-  }, [showSettingsModal]);
+  }, [showSettingsModal, loading]);
 
   useEffect(() => {
     resetControlsTimeout();
@@ -147,13 +156,98 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
         }
       } catch (err) {
         console.error('Failed to fetch movie sources:', err);
-      } finally {
         setLoading(false);
       }
     }
 
     fetchMovieSources();
   }, [movieUid, movie]);
+
+  // Keep Refs synchronized for unmount flush & 10s watch history debouncer
+  const currentTimeRef = useRef(0);
+  const durationRef = useRef(0);
+
+  useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
+
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
+
+  // Telemetry Engine: Log telemetry row into 'stream_analytics' on active stream trigger & quality switch
+  const saCounterRef = useRef(1);
+  useEffect(() => {
+    if (activeVideoUrl) {
+      const tgUser = getTelegramUserInfo();
+      const activeSrc = sources.find(s => s.quality === currentQuality) || sources[0];
+      const currentSaIndex = (activeSrc?.sa_account_index && activeSrc.sa_account_index > 1) 
+        ? activeSrc.sa_account_index 
+        : ((saCounterRef.current++) % 20) + 1;
+      logStreamAnalytics(movieUid, tgUser?.id, currentQuality || '1080p', currentSaIndex);
+    }
+  }, [activeVideoUrl, movieUid, currentQuality]);
+
+  // Continue Watching Engine: 10-Second Debounced Watch History Saver & Component Unmount Flush
+  useEffect(() => {
+    const tgUser = getTelegramUserInfo();
+
+    const interval = setInterval(() => {
+      if (currentTimeRef.current > 0) {
+        saveWatchProgress(tgUser?.id, movieUid, currentTimeRef.current, durationRef.current);
+      }
+    }, 10000);
+
+    return () => {
+      clearInterval(interval);
+      // Flush final playback progress on unmount with ZERO memory leaks
+      if (currentTimeRef.current > 0) {
+        saveWatchProgress(tgUser?.id, movieUid, currentTimeRef.current, durationRef.current);
+      }
+    };
+  }, [movieUid]);
+
+  // Safety timeout: Automatically clear full-screen loader after 4s to prevent UI locks
+  useEffect(() => {
+    let timer;
+    if (loading) {
+      timer = setTimeout(() => {
+        setLoading(false);
+      }, 4000);
+    }
+    return () => clearTimeout(timer);
+  }, [loading, activeVideoUrl]);
+
+  // Adaptive Stream Recovery & Container Fallback Engine
+  const handleVideoError = (err) => {
+    console.warn('[Video Engine Warning] Native browser HTML5 decoder encountered container issue, initiating adaptive fallback:', err);
+    if (retryCount === 0) {
+      setRetryCount(1);
+      setLoading(true);
+      setActiveVideoUrl(prev => `${prev.replace(/&container=.*$/, '')}&container=mp4&progressive=1`);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.load();
+          videoRef.current.play().catch(() => {});
+        }
+      }, 250);
+    } else if (retryCount === 1) {
+      setRetryCount(2);
+      setLoading(true);
+      setActiveVideoUrl(prev => `${prev.replace(/&container=.*$/, '')}&container=webm&progressive=1`);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.load();
+          videoRef.current.play().catch(() => {});
+        }
+      }, 250);
+    } else {
+      // Clean Error Recovery: Stop loader & set video error state instead of loading dummy sample video
+      console.warn('[Video Engine] All container retries exhausted for stream proxy.');
+      setLoading(false);
+      setVideoError(true);
+    }
+  };
 
   // 2. Play / Pause Handler
   const togglePlay = () => {
@@ -196,6 +290,10 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     setCurrentQuality(targetQuality);
     const newUrl = getProxyStreamUrl(driveId);
     setActiveVideoUrl(newUrl);
+
+    // Telemetry log for quality switch
+    const tgUser = getTelegramUserInfo();
+    logStreamAnalytics(movieUid, tgUser?.id, targetQuality, sourceObj.sa_account_index || 1);
 
     setTouchFeedback(`Switched to ${targetQuality}`);
     setTimeout(() => setTouchFeedback(null), 1200);
@@ -475,92 +573,71 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
         exit={{ opacity: 0, scale: 0.95 }}
         className="fixed inset-0 h-[100dvh] w-[100dvw] z-50 bg-black flex flex-col items-center justify-between overflow-hidden select-none touch-none"
       >
-        {/* Loading Spinner Screen */}
-        {loading && !videoError && (
-          <div className="absolute inset-0 z-40 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center text-white">
-            <Loader2 className="w-10 h-10 animate-spin text-red-600 mb-3" />
-            <span className="text-xs font-bold font-mono tracking-wider text-slate-300">
-              Connecting to Stream Proxy Node...
-            </span>
-          </div>
-        )}
+        {/* 2026 Hyper-Premium SMD Cinematic Loader */}
+        <AnimatePresence>
+          {loading && !videoError && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="absolute inset-0 z-15 flex flex-col items-center justify-center bg-black/40 backdrop-blur-xs transition-all duration-500 pointer-events-none"
+            >
+              {/* Outer Pulsing Neon Ring */}
+              <div className="relative flex items-center justify-center w-24 h-24">
+                <div className="absolute inset-0 rounded-full border-2 border-red-500/20 animate-ping"></div>
+                <div className="absolute inset-0 rounded-full border-t-2 border-red-500 animate-spin"></div>
+                <div className="absolute inset-2 rounded-full border-b-2 border-cyan-400 animate-[spin_2s_linear_infinite_reverse]"></div>
+                
+                {/* Center Glass Core with SMD Text */}
+                <div className="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-zinc-950/80 border border-white/10 shadow-[0_0_30px_rgba(239,68,68,0.3)] backdrop-blur-md">
+                  <span className="text-lg font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-rose-400 to-white animate-pulse">
+                    SMD
+                  </span>
+                </div>
+              </div>
 
-        {/* MKV / Decode Format Launcher Overlay */}
+              {/* Subtitle / Status Text */}
+              <div className="mt-6 flex flex-col items-center space-y-1">
+                <span className="text-xs font-medium tracking-[0.3em] text-zinc-400 uppercase">
+                  Buffer Syncing
+                </span>
+                <div className="flex space-x-1.5 mt-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-bounce" style={{ animationDelay: '0s' }}></div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Adaptive Stream Recovery & Minimal Notification Overlay */}
         {videoError && (
-          <div className="absolute inset-0 z-40 bg-zinc-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-white text-center">
-            <div className="w-14 h-14 rounded-full bg-orange-600/20 border border-orange-500/40 flex items-center justify-center text-orange-500 mb-4 animate-pulse">
-              <AlertCircle className="w-8 h-8" />
-            </div>
-            
-            <h3 className="text-base font-extrabold font-heading mb-1 text-white">
-              HD MKV Video Format Detected
-            </h3>
-            <p className="text-xs text-zinc-400 max-w-xs mb-6 leading-relaxed font-sans">
-              This movie is encoded in 1080p MKV format. Webview browsers require external hardware decoding for MKV files.
-            </p>
-
-            <div className="flex flex-col gap-3 w-full max-w-xs">
-              {/* VLC Player Launcher */}
-              <a
-                href={`vlc://${activeVideoUrl}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-extrabold text-xs tracking-wider flex items-center justify-center gap-2.5 shadow-lg active:scale-95 transition-all"
-              >
-                <Play className="w-4 h-4 fill-current" />
-                <span>PLAY IN VLC PLAYER</span>
-              </a>
-
-              {/* Direct Download Stream */}
-              <button
-                onClick={() => {
-                  triggerHaptic('heavy');
-                  const downloadUrl = `${activeVideoUrl}&download=1`;
-                  const link = document.createElement('a');
-                  link.href = downloadUrl;
-                  link.target = '_blank';
-                  link.rel = 'noopener noreferrer';
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                }}
-                className="w-full py-3 px-4 rounded-2xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 font-extrabold text-xs flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all"
-              >
-                <Clock className="w-4 h-4 text-cyan-400" />
-                <span>DIRECT DOWNLOAD MOVIE</span>
-              </button>
-
-              {/* Retry Direct Stream */}
-              <button
-                onClick={() => {
-                  setVideoError(false);
-                  setLoading(true);
-                  if (videoRef.current) {
-                    videoRef.current.load();
-                    videoRef.current.play().catch(() => {});
-                  }
-                }}
-                className="w-full py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all"
-              >
-                <Play className="w-4 h-4 fill-current" />
-                <span>RETRY DIRECT STREAMING</span>
-              </button>
-
-              {/* Web Preview Alternative */}
-              <button
-                onClick={() => {
-                  setVideoError(false);
-                  setActiveVideoUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
-                }}
-                className="w-full py-2.5 px-4 rounded-2xl bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 font-bold text-xs active:scale-95 transition-all"
-              >
-                PLAY WEB DEMO PREVIEW (MP4)
-              </button>
-            </div>
+          <div className="absolute top-16 z-40 px-4 py-2.5 rounded-2xl bg-zinc-950/90 text-white border border-amber-500/40 shadow-2xl backdrop-blur-md flex items-center gap-3">
+            <AlertCircle className="w-4 h-4 text-amber-400 animate-pulse flex-shrink-0" />
+            <span className="text-xs font-semibold text-zinc-200">
+              Optimizing inline stream delivery...
+            </span>
+            <button
+              onClick={() => {
+                triggerHaptic('medium');
+                setVideoError(false);
+                setRetryCount(0);
+                setLoading(true);
+                if (videoRef.current) {
+                  videoRef.current.load();
+                  videoRef.current.play().catch(() => {});
+                }
+              }}
+              className="px-3 py-1 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-[11px] transition active:scale-95 shadow-md"
+            >
+              Retry Stream
+            </button>
           </div>
         )}
 
-        {/* Top Header Control Bar (Clean & Minimalist: Back + Title + Single Settings Icon) */}
+        {/* Top Header Control Bar (Clean & Minimalist: Back + Title + Download + Settings) */}
         <AnimatePresence>
           {showControls && (
             <motion.div
@@ -568,7 +645,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.2 }}
-              className="w-full z-30 p-3 sm:p-4 bg-gradient-to-b from-black/90 via-black/60 to-transparent flex items-center justify-between pointer-events-auto"
+              className="w-full z-40 p-3 sm:p-4 bg-gradient-to-b from-black/90 via-black/60 to-transparent flex items-center justify-between pointer-events-auto"
             >
               {/* Back Button */}
               <button
@@ -593,8 +670,35 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                 </div>
               </div>
 
-              {/* Single Minimalist Master Settings Gear Button */}
-              <div className="relative">
+              {/* Action Buttons Group (Download + Master Settings) */}
+              <div className="flex items-center gap-2 relative">
+                <button
+                  onClick={async () => {
+                    triggerHaptic('heavy');
+                    setDownloading(true);
+                    const driveId = sources.find(s => s.quality === currentQuality)?.drive_file_id || movie?.file_id || movie?.drive_file_id;
+                    await downloadMovieStream(driveId, movieTitle, currentQuality || '1080p', (percent, state) => {
+                      setDownloadProgress(percent);
+                      if (state === 'completed') {
+                        setTimeout(() => {
+                          setDownloading(false);
+                          setDownloadProgress(null);
+                        }, 2000);
+                      }
+                    });
+                  }}
+                  className="p-2.5 rounded-full bg-zinc-900/90 hover:bg-zinc-800 text-white border border-zinc-700/80 backdrop-blur-md active:scale-95 shadow-lg transition-all"
+                  title="Download Movie Stream"
+                >
+                  {downloading ? (
+                    <span className="text-[10px] font-mono font-bold text-emerald-400 px-1">
+                      {downloadProgress !== null ? `${downloadProgress}%` : 'DL...'}
+                    </span>
+                  ) : (
+                    <Download className="w-4.5 h-4.5" />
+                  )}
+                </button>
+
                 <button
                   onClick={() => {
                     triggerHaptic('light');
@@ -927,29 +1031,65 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
             src={activeVideoUrl}
             autoPlay
             playsInline
+            webkit-playsinline="true"
+            preload="auto"
+            crossOrigin="anonymous"
+            muted={isMuted}
             style={{ filter: `brightness(${brightness}%)` }}
             className="w-full h-full object-contain z-0"
             onTimeUpdate={() => {
-              if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+              if (videoRef.current) {
+                setCurrentTime(videoRef.current.currentTime);
+                if (videoRef.current.currentTime > 0) {
+                  setLoading(false);
+                }
+              }
             }}
             onLoadedMetadata={() => {
               if (videoRef.current && videoRef.current.duration) {
-                setDuration(videoRef.current.duration);
+                const durSec = videoRef.current.duration;
+                setDuration(durSec);
+                durationRef.current = durSec;
                 videoRef.current.playbackRate = playbackSpeed;
+
+                // Dynamically store duration_seconds & formatted_duration in Supabase 'movie_metadata' table
+                if (movieUid && durSec > 0 && isFinite(durSec)) {
+                  const formatted = formatDurationString(durSec);
+                  upsertMovieDuration(movieUid, durSec, formatted);
+                }
+
+                // Resume saved progress position if user was previously watching
+                const savedProgress = Number(movie?.progress_seconds || 0);
+                if (savedProgress > 5 && savedProgress < (durSec - 10)) {
+                  videoRef.current.currentTime = savedProgress;
+                  setCurrentTime(savedProgress);
+                  currentTimeRef.current = savedProgress;
+                }
               }
-              setLoading(false);
             }}
             onCanPlay={() => {
               setLoading(false);
               setVideoError(false);
             }}
+            onPlaying={() => {
+              setLoading(false);
+              setIsPlaying(true);
+            }}
+            onWaiting={() => {
+              if (!videoRef.current || videoRef.current.currentTime === 0) {
+                setLoading(true);
+              }
+            }}
+            onStalled={() => {
+              if (!videoRef.current || videoRef.current.currentTime === 0) {
+                setLoading(true);
+              }
+            }}
+            onSeeking={() => setLoading(true)}
+            onSeeked={() => setLoading(false)}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
-            onError={(e) => {
-              console.warn('Native browser HTML5 player cannot decode container directly:', e);
-              setLoading(false);
-              setVideoError(true);
-            }}
+            onError={handleVideoError}
             onEnded={() => setIsPlaying(false)}
           >
             {subtitleTracks.filter(s => s.id !== 'off').map((sub) => (
@@ -973,7 +1113,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
               transition={{ duration: 0.2 }}
-              className="w-full z-30 p-3 sm:p-4 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex flex-col gap-2 pointer-events-auto"
+              className="w-full z-40 p-3 sm:p-4 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex flex-col gap-2 pointer-events-auto"
             >
               {/* Scrubbing Timeline Bar */}
               <div className="flex items-center gap-3 w-full">

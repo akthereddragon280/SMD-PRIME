@@ -172,13 +172,46 @@ function parseAndSanitizeFileName(fullName, fileSizeInBytes) {
 
   const quality = codec ? `${baseQuality} ${codec}` : baseQuality;
 
-  // Step H: Extract Audio Codecs & Languages
+  // Step H: Extract Audio Codecs & Languages accurately
+  // Strip promo site names & handles BEFORE running language keyword regex
+  const cleanForLang = fullName
+    .replace(/1TamilMV/gi, '')
+    .replace(/TamilBlasters/gi, '')
+    .replace(/TamilMV/gi, '')
+    .replace(/MoviezTamizha/gi, '')
+    .replace(/^@[A-Za-z0-9_.]+\s*/gi, '')
+    .replace(/\[1TamilMV[^\]]*\]/gi, '');
+
   const audioLangs = [];
-  if (/tam|tamil/i.test(fullName)) audioLangs.push('Tam');
-  if (/tel|telugu/i.test(fullName)) audioLangs.push('Tel');
-  if (/hin|hindi/i.test(fullName)) audioLangs.push('Hin');
-  if (/eng|english/i.test(fullName)) audioLangs.push('Eng');
-  if (audioLangs.length === 0) audioLangs.push('Tam', 'Tel', 'Hin', 'Eng');
+  const isMulti = /(dual[\s_-]*audio|multi[\s_-]*audio|multi|dual)/i.test(cleanForLang);
+
+  if (/\b(tam|tamil|tns)\b/i.test(cleanForLang) || /\[tam\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Tamil')) audioLangs.push('Tamil');
+  }
+  if (/\b(tel|telugu|tl)\b/i.test(cleanForLang) || /\[tel\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Telugu')) audioLangs.push('Telugu');
+  }
+  if (/\b(hin|hindi|hd)\b/i.test(cleanForLang) || /\[hin\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Hindi')) audioLangs.push('Hindi');
+  }
+  if (/\b(mal|malayalam)\b/i.test(cleanForLang) || /\[mal\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Malayalam')) audioLangs.push('Malayalam');
+  }
+  if (/\b(kan|kannada)\b/i.test(cleanForLang) || /\[kan\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Kannada')) audioLangs.push('Kannada');
+  }
+  if (/\b(eng|english)\b/i.test(cleanForLang) || /\[eng\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('English')) audioLangs.push('English');
+  }
+
+  if (isMulti && audioLangs.length <= 1) {
+    audioLangs.push('Multi Audio');
+  }
+
+  // High ROI Default Fallback: If no language tag is present in filename, default to ["Tamil"]
+  if (audioLangs.length === 0) {
+    audioLangs.push('Tamil');
+  }
 
   // Step I: Isolate Pure Clean Title (Cut off at year or resolution indicator)
   let cleanTitle = name;
@@ -411,18 +444,20 @@ async function syncDriveToSupabase() {
       console.log(`✨ Movie Record Pushed: "${meta.title}" (${meta.release_year}) -> Poster: ${meta.poster_url.substring(0, 45)}...`);
     }
 
-    // Insert/Upsert only NEW quality variants into Supabase 'movie_sources' table
-    for (const src of movieGroup.sources) {
-      if (existingFileIdSet.has(src.drive_file_id)) continue;
+      let saCounter = 1;
+      for (const src of movieGroup.sources) {
+        if (existingFileIdSet.has(src.drive_file_id)) continue;
+        const saIndex = (saCounter % 20) + 1;
+        saCounter++;
 
-      let { error: sErr } = await supabase.from('movie_sources').upsert({
-        movie_uid: uid,
-        quality: src.quality,
-        drive_file_id: src.drive_file_id,
-        file_size: src.file_size,
-        audio_languages: movieGroup.audioLangs || ['Tam', 'Tel', 'Hin', 'Eng'],
-        sa_account_index: 1
-      }, { onConflict: 'movie_uid, quality' });
+        let { error: sErr } = await supabase.from('movie_sources').upsert({
+          movie_uid: uid,
+          quality: src.quality,
+          drive_file_id: src.drive_file_id,
+          file_size: src.file_size,
+          audio_languages: movieGroup.audioLangs || ['Tamil'],
+          sa_account_index: saIndex
+        }, { onConflict: 'movie_uid, quality' });
 
       if (sErr) {
         const { error: insErr } = await supabase.from('movie_sources').insert({

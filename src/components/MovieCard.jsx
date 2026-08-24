@@ -56,17 +56,24 @@ export default function MovieCard({ movie, onSelectMovie, onPlay, darkMode }) {
           <span>{movie.rating || '8.8'}</span>
         </div>
 
-        {/* Dynamic Quality / Codec Badge */}
-        {movie.sources && movie.sources.length > 0 && movie.sources[0]?.quality && (
-          <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-zinc-950/85 text-emerald-400 border border-emerald-500/30 text-[9px] font-black uppercase tracking-wider backdrop-blur-xs shadow-xs">
-            {movie.sources[0].quality}
-          </div>
-        )}
-
         {/* Hot / Trending badge */}
         {movie.trending && (
           <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-gradient-to-r from-red-600 to-rose-600 text-white text-[9px] font-black uppercase tracking-wider shadow-md shadow-red-600/30">
             HOT
+          </div>
+        )}
+
+        {/* Continue Watching Progress Bar Overlay */}
+        {movie.progress_seconds > 0 && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-950/60 z-10">
+            <div 
+              className="h-full bg-gradient-to-r from-red-600 to-rose-500 rounded-r-full shadow-[0_0_8px_rgba(239,68,68,0.8)]"
+              style={{
+                width: `${movie.duration_seconds > 0 
+                  ? Math.min(100, Math.max(5, (movie.progress_seconds / movie.duration_seconds) * 100)) 
+                  : 30}%`
+              }}
+            />
           </div>
         )}
 

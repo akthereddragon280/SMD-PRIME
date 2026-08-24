@@ -1,40 +1,64 @@
 import React, { useState, useEffect } from 'react';
-import { fetchMoviesFromSupabase } from './supabaseClient';
+import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching } from './supabaseClient';
 import Header from './components/Header';
 import HeroBanner from './components/HeroBanner';
 import MovieRow from './components/MovieRow';
 import MovieModal from './components/MovieModal';
 import VideoPlayer from './components/VideoPlayer';
 import SearchOverlay from './components/SearchOverlay';
-import { initTelegramApp, triggerHaptic } from './utils/telegram';
-import { Flame, Zap, Compass, Clapperboard, Smartphone, Monitor, MoreVertical, X, Loader2, Database, Film } from 'lucide-react';
+import AdminModal from './components/AdminModal';
+import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
+import { Flame, Zap, Compass, Clapperboard, Smartphone, Monitor, MoreVertical, X, Loader2, Database, Film, History } from 'lucide-react';
 
 export default function App() {
-  // Light mode theme by default
-  const [darkMode, setDarkMode] = useState(false);
+  // Dark mode theme by default
+  const [darkMode, setDarkMode] = useState(true);
   const [activeCategory, setActiveCategory] = useState('All');
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [activePlayingMovie, setActivePlayingMovie] = useState(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
   
   // Supabase Data State (Strictly Google Drive Synced Files Only)
   const [moviesList, setMoviesList] = useState([]);
+  const [continueWatchingList, setContinueWatchingList] = useState([]);
+  const [telegramUser, setTelegramUser] = useState(null);
   const [isLoadingSupabase, setIsLoadingSupabase] = useState(true);
   const [isLiveDatabase, setIsLiveDatabase] = useState(false);
 
   // Mobile Frame constraint mode for desktop preview
   const [isMobileFrame, setIsMobileFrame] = useState(true);
 
-  // Initialize Telegram WebApp & fetch Supabase data on mount
+  // Helper to reload Continue Watching row
+  const refreshContinueWatching = async (allMovies = moviesList) => {
+    const tgUser = getTelegramUserInfo();
+    const items = await fetchContinueWatching(tgUser?.id, allMovies);
+    setContinueWatchingList(items);
+  };
+
+  // Initialize Telegram WebApp, sync user profile, & fetch Supabase data on mount
   useEffect(() => {
     initTelegramApp();
 
-    async function loadDatabaseMovies() {
+    async function loadDatabaseAndUser() {
       setIsLoadingSupabase(true);
+      
+      // 1. Capture window.Telegram.WebApp.initDataUnsafe?.user and upsert into Supabase 'users' table
+      const tgUser = getTelegramUserInfo();
+      if (tgUser) {
+        setTelegramUser(tgUser);
+        await upsertTelegramUser(tgUser);
+      }
+
+      // 2. Fetch all movies from Supabase
       const data = await fetchMoviesFromSupabase();
       if (data && data.length > 0) {
         setMoviesList(data);
         setIsLiveDatabase(true);
+
+        // 3. Fetch Continue Watching history
+        const continueItems = await fetchContinueWatching(tgUser?.id, data);
+        setContinueWatchingList(continueItems);
       } else {
         setMoviesList([]);
         setIsLiveDatabase(false);
@@ -42,7 +66,7 @@ export default function App() {
       setIsLoadingSupabase(false);
     }
 
-    loadDatabaseMovies();
+    loadDatabaseAndUser();
   }, []);
 
   // Filter movies strictly from Google Drive synced list
@@ -151,6 +175,7 @@ export default function App() {
         {/* Sticky App Header */}
         <Header
           onOpenSearch={() => setIsSearchOpen(true)}
+          onOpenAdmin={() => setIsAdminOpen(true)}
           darkMode={darkMode}
           setDarkMode={setDarkMode}
           activeCategory={activeCategory}
@@ -185,7 +210,7 @@ export default function App() {
         {isLoadingSupabase && (
           <div className="flex items-center justify-center gap-2.5 py-12 text-xs font-extrabold text-slate-500">
             <Loader2 className="w-5 h-5 animate-spin text-red-600" />
-            <span>Fetching Live Google Drive Files...</span>
+            <span>Fetching Live SMD Media Library...</span>
           </div>
         )}
 
@@ -200,10 +225,10 @@ export default function App() {
               }`}>
                 <Film className="w-12 h-12 text-red-600 mb-3 animate-pulse" />
                 <h3 className="text-base font-extrabold text-slate-900 dark:text-white mb-1">
-                  No Google Drive Files Found
+                  No Movies Found in Library
                 </h3>
                 <p className="text-xs text-slate-500 max-w-xs leading-relaxed font-medium">
-                  Upload video files (.mkv, .mp4) to your Google Drive folder to auto-sync movies live to the TMA dashboard.
+                  No active streams available in the cloud library. Please check back soon for new movie additions.
                 </p>
               </div>
             ) : (
@@ -218,6 +243,18 @@ export default function App() {
                   />
                 )}
 
+                {/* Continue Watching Row */}
+                {continueWatchingList.length > 0 && (activeCategory === 'All' || activeCategory === 'Trending') && (
+                  <MovieRow
+                    title="Continue Watching"
+                    movies={continueWatchingList}
+                    onSelectMovie={(m) => setSelectedMovie(m)}
+                    onPlay={(m) => setActivePlayingMovie(m)}
+                    darkMode={darkMode}
+                    icon={<History className="w-5 h-5 text-red-600 animate-pulse" />}
+                  />
+                )}
+
                 {/* Genre Movie Rows */}
                 {activeCategory === 'All' && (
                   <>
@@ -228,6 +265,7 @@ export default function App() {
                         onSelectMovie={(m) => setSelectedMovie(m)}
                         onPlay={(m) => setActivePlayingMovie(m)}
                         darkMode={darkMode}
+                        onViewAll={() => setActiveCategory('Trending')}
                         icon={<Flame className="w-5 h-5 fill-red-600 text-red-600 animate-pulse" />}
                       />
                     )}
@@ -239,6 +277,7 @@ export default function App() {
                         onSelectMovie={(m) => setSelectedMovie(m)}
                         onPlay={(m) => setActivePlayingMovie(m)}
                         darkMode={darkMode}
+                        onViewAll={() => setActiveCategory('Action')}
                         icon={<Zap className="w-5 h-5 text-amber-500" />}
                       />
                     )}
@@ -250,6 +289,7 @@ export default function App() {
                         onSelectMovie={(m) => setSelectedMovie(m)}
                         onPlay={(m) => setActivePlayingMovie(m)}
                         darkMode={darkMode}
+                        onViewAll={() => setActiveCategory('Sci-Fi')}
                         icon={<Compass className="w-5 h-5 text-cyan-400" />}
                       />
                     )}
@@ -261,17 +301,19 @@ export default function App() {
                         onSelectMovie={(m) => setSelectedMovie(m)}
                         onPlay={(m) => setActivePlayingMovie(m)}
                         darkMode={darkMode}
+                        onViewAll={() => setActiveCategory('Drama')}
                         icon={<Clapperboard className="w-5 h-5 text-emerald-400" />}
                       />
                     )}
 
-                    {/* Catch-all for movies that don't match standard category filters */}
+                    {/* Catch-all for movies in synced library */}
                     <MovieRow
                       title="All Synced Library Files"
                       movies={moviesList}
                       onSelectMovie={(m) => setSelectedMovie(m)}
                       onPlay={(m) => setActivePlayingMovie(m)}
                       darkMode={darkMode}
+                      onViewAll={() => setIsSearchOpen(true)}
                     />
                   </>
                 )}
@@ -339,7 +381,10 @@ export default function App() {
       {activePlayingMovie && (
         <VideoPlayer
           movie={activePlayingMovie}
-          onClose={() => setActivePlayingMovie(null)}
+          onClose={() => {
+            setActivePlayingMovie(null);
+            refreshContinueWatching();
+          }}
         />
       )}
 
@@ -351,6 +396,15 @@ export default function App() {
           onSelectMovie={(m) => setSelectedMovie(m)}
           onPlay={(m) => setActivePlayingMovie(m)}
           darkMode={darkMode}
+        />
+      )}
+
+      {/* Admin Command Center Modal */}
+      {isAdminOpen && (
+        <AdminModal
+          onClose={() => setIsAdminOpen(false)}
+          darkMode={darkMode}
+          totalMoviesCount={moviesList.length}
         />
       )}
 

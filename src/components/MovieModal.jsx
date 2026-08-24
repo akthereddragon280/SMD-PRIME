@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Play, Star, Clock, Calendar, Download, ShieldCheck, Film, CheckCircle2, Sparkles } from 'lucide-react';
+import { ArrowLeft, Play, Star, Clock, Calendar, Download, ShieldCheck, Film, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase } from '../supabaseClient';
-import { getProxyStreamUrl } from '../utils/proxy';
-import { triggerHaptic, useTelegramBackButton } from '../utils/telegram';
+import { supabase, logDownloadAnalytics } from '../supabaseClient';
+import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
+import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 import { getExactMovieDuration } from '../utils/posters';
+import { getOptimalStreamSource } from './SmartVideoPlayer';
 
 export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
   const [sources, setSources] = useState(movie?.sources || []);
   const [loadingSources, setLoadingSources] = useState(false);
   const [downloadingQuality, setDownloadingQuality] = useState(null);
+  const [downloadProgress, setDownloadProgress] = useState(null);
 
   // Bind Telegram native BackButton to close modal when active
   useTelegramBackButton(movie ? onClose : null);
@@ -86,27 +88,41 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
     if (onPlay) onPlay(movie, source);
   };
 
-  const handleDownloadClick = (source) => {
+  const handleDownloadClick = async (source) => {
     triggerHaptic('heavy');
     const quality = source?.quality || '1080p';
     const fileId = source?.drive_file_id || movie.file_id;
-    const downloadUrl = `${getProxyStreamUrl(fileId)}&download=1`;
-    
+    const movieUid = movie.uid || movie.id;
+    const movieTitle = movie.title || movie.name || 'Movie';
+    const tgUser = getTelegramUserInfo();
+
+    // Log download event asynchronously into Supabase download_analytics table
+    logDownloadAnalytics(movieUid, tgUser?.id || 0, quality).catch(err => {
+      console.warn('Failed to record download analytics:', err);
+    });
+
     setDownloadingQuality(quality);
 
-    // Trigger cross-origin direct download with target="_blank"
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    setTimeout(() => {
-      setDownloadingQuality(null);
-    }, 3500);
+    await downloadMovieStream(fileId, movieTitle, quality, (percent, state) => {
+      setDownloadProgress(percent);
+      if (state === 'completed') {
+        setTimeout(() => {
+          setDownloadingQuality(null);
+          setDownloadProgress(null);
+        }, 2000);
+      }
+    });
   };
+
+  const parseSizeInGB = (sizeStr) => {
+    if (!sizeStr) return 0;
+    const str = String(sizeStr).toUpperCase().trim();
+    const val = parseFloat(str.replace(/[^0-9.]/g, '')) || 0;
+    if (str.includes('MB')) return val / 1024;
+    return val;
+  };
+
+  const optimalStreamSource = getOptimalStreamSource(sources);
 
   return (
     <AnimatePresence>
@@ -210,19 +226,19 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
             </div>
 
             {/* Primary Play Button */}
-            {sortedSources.length > 0 ? (
+            {optimalStreamSource ? (
               <button
-                onClick={() => handlePlayClick(sortedSources[0])}
+                onClick={() => handlePlayClick(optimalStreamSource)}
                 className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-red-600 via-red-500 to-rose-600 hover:brightness-110 text-white font-black text-sm py-4 px-6 rounded-2xl shadow-xl shadow-red-600/35 border border-red-400/30 transition active:scale-[0.98]"
               >
                 <Play className="w-5 h-5 fill-white ml-0.5" />
-                <span>Play Movie ({sortedSources[0]?.quality || '1080p HD'})</span>
+                <span>Play Movie ({optimalStreamSource.quality} {optimalStreamSource.video_codec || ''})</span>
               </button>
             ) : (
               <div className={`w-full text-center py-4 text-xs font-bold rounded-2xl border ${
-                darkMode ? 'bg-zinc-900 text-zinc-400 border-zinc-800' : 'bg-slate-100 text-slate-600 border-slate-200'
+                darkMode ? 'bg-red-950/40 text-red-400 border-red-500/30' : 'bg-red-50 text-red-600 border-red-200'
               }`}>
-                {loadingSources ? 'Loading stream options...' : 'Stream unavailable'}
+                {loadingSources ? 'Loading stream options...' : 'Streaming Unavailable (>4GB File Size Cutoff)'}
               </div>
             )}
           </div>
@@ -251,54 +267,68 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
             </h3>
 
             <div className="space-y-2.5">
-              {sortedSources.map((src, index) => (
-                <div
-                  key={src.id || index}
-                  className={`flex items-center justify-between p-4 rounded-2xl border transition ${
-                    darkMode 
-                      ? 'bg-zinc-900/80 hover:bg-zinc-800/90 border-zinc-800 text-zinc-200' 
-                      : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-900 shadow-xs'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="px-3 py-1 text-xs font-black bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-xl shadow-xs">
-                      {src.quality || '1080p'}
-                    </span>
-                    <div>
-                      <p className="text-xs font-extrabold">{src.file_size || '1.5 GB'}</p>
-                      <p className="text-[10px] font-semibold text-slate-400 dark:text-zinc-400">
-                        High Quality Direct Stream
-                      </p>
+              {sortedSources.map((src, index) => {
+                const sizeInGb = typeof src.size_gb === 'number' ? src.size_gb : parseSizeInGB(src.file_size);
+                const isExceedingLimit = sizeInGb > 4.0;
+
+                return (
+                  <div
+                    key={src.id || index}
+                    className={`flex items-center justify-between p-4 rounded-2xl border transition ${
+                      darkMode 
+                        ? 'bg-zinc-900/80 hover:bg-zinc-800/90 border-zinc-800 text-zinc-200' 
+                        : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-900 shadow-xs'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="px-3 py-1 text-xs font-black bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-xl shadow-xs">
+                        {src.quality || '1080p'}
+                      </span>
+                      <div>
+                        <p className="text-xs font-extrabold">{src.file_size || `${sizeInGb.toFixed(1)} GB`}</p>
+                        <p className="text-[10px] font-semibold text-slate-400 dark:text-zinc-400">
+                          {isExceedingLimit ? 'Download Only (>4GB Cutoff)' : 'High Quality Direct Stream'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {!isExceedingLimit ? (
+                        <button
+                          onClick={() => handlePlayClick(src)}
+                          className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-extrabold rounded-xl transition shadow-md shadow-red-600/30 flex items-center gap-1.5 active:scale-95"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-white" />
+                          <span>Stream</span>
+                        </button>
+                      ) : (
+                        <span className="px-3 py-1.5 text-[11px] font-mono font-bold bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl">
+                          Download Only
+                        </span>
+                      )}
+                      
+                      <button
+                        onClick={() => handleDownloadClick(src)}
+                        disabled={downloadingQuality === src.quality}
+                        className={`p-2.5 rounded-xl transition flex items-center justify-center min-w-[40px] ${
+                          darkMode 
+                            ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white' 
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900'
+                        }`}
+                        title="Download Movie"
+                      >
+                        {downloadingQuality === src.quality ? (
+                          <div className="flex items-center gap-1 text-[10px] font-mono font-extrabold text-emerald-400">
+                            {downloadProgress !== null ? `${downloadProgress}%` : <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />}
+                          </div>
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handlePlayClick(src)}
-                      className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-extrabold rounded-xl transition shadow-md shadow-red-600/30 flex items-center gap-1.5 active:scale-95"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-white" />
-                      <span>Stream</span>
-                    </button>
-                    
-                    <button
-                      onClick={() => handleDownloadClick(src)}
-                      className={`p-2.5 rounded-xl transition ${
-                        darkMode 
-                          ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white' 
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900'
-                      }`}
-                      title="Download Movie"
-                    >
-                      {downloadingQuality === src.quality ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500 animate-pulse" />
-                      ) : (
-                        <Download className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

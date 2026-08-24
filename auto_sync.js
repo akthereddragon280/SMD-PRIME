@@ -82,6 +82,55 @@ async function getGoogleDriveAccessToken() {
   }
 }
 
+/**
+ * HIGH ROI SMART AUDIO LANGUAGE PARSER
+ * Strips website domains/channel handles first so "1TamilMV", "TamilBlasters", "@MoviezTamizha"
+ * do NOT trigger false Tamil/Multi-Audio matches.
+ */
+export function parseAudioLanguagesFromFileName(fullName) {
+  // Strip promo site names & handles BEFORE running language keyword regex
+  const cleanForLang = fullName
+    .replace(/1TamilMV/gi, '')
+    .replace(/TamilBlasters/gi, '')
+    .replace(/TamilMV/gi, '')
+    .replace(/MoviezTamizha/gi, '')
+    .replace(/^@[A-Za-z0-9_.]+\s*/gi, '')
+    .replace(/\[1TamilMV[^\]]*\]/gi, '');
+
+  const audioLangs = [];
+  const isMulti = /(dual[\s_-]*audio|multi[\s_-]*audio|multi|dual)/i.test(cleanForLang);
+
+  if (/\b(tam|tamil|tns)\b/i.test(cleanForLang) || /\[tam\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Tamil')) audioLangs.push('Tamil');
+  }
+  if (/\b(tel|telugu|tl)\b/i.test(cleanForLang) || /\[tel\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Telugu')) audioLangs.push('Telugu');
+  }
+  if (/\b(hin|hindi|hd)\b/i.test(cleanForLang) || /\[hin\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Hindi')) audioLangs.push('Hindi');
+  }
+  if (/\b(mal|malayalam)\b/i.test(cleanForLang) || /\[mal\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Malayalam')) audioLangs.push('Malayalam');
+  }
+  if (/\b(kan|kannada)\b/i.test(cleanForLang) || /\[kan\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('Kannada')) audioLangs.push('Kannada');
+  }
+  if (/\b(eng|english)\b/i.test(cleanForLang) || /\[eng\]/i.test(cleanForLang)) {
+    if (!audioLangs.includes('English')) audioLangs.push('English');
+  }
+
+  if (isMulti && audioLangs.length <= 1) {
+    return ['Multi Audio'];
+  }
+
+  // High ROI Default Fallback: If no language tag is present in filename, default to ["Tamil"]
+  if (audioLangs.length === 0) {
+    return ['Tamil'];
+  }
+
+  return audioLangs;
+}
+
 function parseAndSanitizeFileName(fullName, fileSizeInBytes) {
   let name = fullName.trim();
   name = name.replace(/\.(mkv|mp4|avi|mov|flv|webm)$/i, '');
@@ -100,12 +149,8 @@ function parseAndSanitizeFileName(fullName, fileSizeInBytes) {
   else if (/720p/i.test(fullName)) quality = '720p';
   else if (/480p/i.test(fullName)) quality = '480p';
 
-  const audioLangs = [];
-  if (/tam|tamil/i.test(fullName)) audioLangs.push('Tam');
-  if (/tel|telugu/i.test(fullName)) audioLangs.push('Tel');
-  if (/hin|hindi/i.test(fullName)) audioLangs.push('Hin');
-  if (/eng|english/i.test(fullName)) audioLangs.push('Eng');
-  if (audioLangs.length === 0) audioLangs.push('Tam', 'Tel', 'Hin', 'Eng');
+  // Use smart language parser
+  const audioLangs = parseAudioLanguagesFromFileName(fullName);
 
   let cleanTitle = name;
   if (yearMatch) {
@@ -128,8 +173,14 @@ function parseAndSanitizeFileName(fullName, fileSizeInBytes) {
     cleanTitle = fullName.replace(/\.(mkv|mp4|avi)$/i, '').replace(/[-_]/g, ' ').trim();
   }
 
+  let codec = 'H264';
+  if (/(hevc|x265|h\.?265)/i.test(fullName)) codec = 'HEVC';
+  else if (/(x264|h\.?264|avc)/i.test(fullName)) codec = 'H264';
+
+  const size_gb = fileSizeInBytes > 0 ? parseFloat((fileSizeInBytes / (1024 * 1024 * 1024)).toFixed(2)) : 1.5;
+
   const uid = `${cleanTitle.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${year || 2026}`;
-  return { cleanTitle, year, quality, audioLangs, uid };
+  return { cleanTitle, year, quality, audioLangs, video_codec: codec, size_gb, uid };
 }
 
 async function runAutoSyncPass() {
@@ -147,9 +198,12 @@ async function runAutoSyncPass() {
 
     const files = data.files.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
 
+    let fileIndex = 0;
     for (const file of files) {
+      fileIndex++;
+      const saIndex = (fileIndex % 20) + 1;
       const rawSizeBytes = Number(file.size) || 0;
-      const { cleanTitle, year, quality, audioLangs, uid } = parseAndSanitizeFileName(file.name, rawSizeBytes);
+      const { cleanTitle, year, quality, audioLangs, video_codec, size_gb, uid } = parseAndSanitizeFileName(file.name, rawSizeBytes);
 
       const tmdb = await fetchAuthenticTMDBMetadata(cleanTitle, year);
 
@@ -170,10 +224,12 @@ async function runAutoSyncPass() {
       await supabase.from('movie_sources').upsert({
         movie_uid: uid,
         quality,
+        video_codec,
+        size_gb,
         drive_file_id: file.id,
-        file_size: rawSizeBytes > 0 ? `${Math.round(rawSizeBytes / (1024 * 1024))} MB` : '1.2 GB',
+        file_size: rawSizeBytes > 0 ? `${(rawSizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : '1.5 GB',
         audio_languages: audioLangs,
-        sa_account_index: 1
+        sa_account_index: saIndex
       }, { onConflict: 'movie_uid, quality' });
     }
 

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import MovieCard from './MovieCard';
 import { triggerHaptic, useTelegramBackButton } from '../utils/telegram';
 import { filterMoviesByMultiParam, sanitizeTitle } from '../supabaseClient';
+import { generateDynamicSVGPoster } from '../utils/posters';
 
 export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, darkMode }) {
   const [query, setQuery] = useState('');
@@ -92,8 +93,8 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.98 }}
         transition={{ duration: 0.2 }}
-        className={`fixed inset-0 h-[100dvh] w-[100dvw] z-50 overflow-y-auto ${
-          darkMode ? 'bg-zinc-950 text-white' : 'bg-slate-900 text-slate-100'
+        className={`fixed inset-0 h-[100dvh] w-[100dvw] z-50 overflow-y-auto overscroll-contain ${
+          darkMode ? 'bg-[#0c0f18] text-white' : 'bg-slate-50 text-slate-900'
         } p-4 sm:p-6 flex flex-col`}
       >
         {/* Top Header & Search Input */}
@@ -101,8 +102,8 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
           <div className="flex items-center gap-3">
             <div className={`flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border transition-all ${
               darkMode 
-                ? 'bg-zinc-900/90 border-white/10 focus-within:border-red-500/80 focus-within:ring-2 focus-within:ring-red-500/20 shadow-xl' 
-                : 'bg-white/90 border-slate-200 focus-within:border-red-500 shadow-md text-slate-900'
+                ? 'bg-zinc-900/90 border-zinc-800 focus-within:border-red-500/80 focus-within:ring-2 focus-within:ring-red-500/20 shadow-xl text-white' 
+                : 'bg-white border-slate-200 focus-within:border-red-500 shadow-md text-slate-900'
             }`}>
               <Search className="w-5 h-5 text-red-500 shrink-0" />
               <input
@@ -112,8 +113,8 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search movie title, year (2026), 1080p, Tamil..."
                 autoFocus
-                className={`w-full bg-transparent border-none outline-none text-sm sm:text-base font-semibold placeholder:text-zinc-500 ${
-                  darkMode ? 'text-white' : 'text-slate-900'
+                className={`w-full bg-transparent border-none outline-none text-sm sm:text-base font-semibold ${
+                  darkMode ? 'text-white placeholder:text-zinc-500' : 'text-slate-900 placeholder:text-slate-400'
                 }`}
               />
               {query && (
@@ -124,7 +125,9 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                     triggerHaptic('light');
                     inputRef.current?.focus();
                   }}
-                  className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+                  className={`p-1.5 rounded-full transition-colors ${
+                    darkMode ? 'text-zinc-400 hover:text-white hover:bg-zinc-800' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-200'
+                  }`}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -136,9 +139,9 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                 triggerHaptic('light');
                 onClose();
               }}
-              className={`px-4 py-3.5 rounded-2xl border font-bold text-xs sm:text-sm transition-all ${
+              className={`px-4 py-3.5 rounded-2xl border font-bold text-xs sm:text-sm transition-all active:scale-95 ${
                 darkMode 
-                  ? 'bg-zinc-900/80 border-white/10 text-zinc-300 hover:bg-zinc-800' 
+                  ? 'bg-zinc-900/80 border-zinc-800 text-zinc-300 hover:bg-zinc-800' 
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 shadow-xs'
               }`}
             >
@@ -148,7 +151,9 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
 
           {/* Quick Filter Chips Bar */}
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-1 pb-1">
-            <span className="text-[11px] font-extrabold text-zinc-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
+            <span className={`text-[11px] font-extrabold uppercase tracking-wider shrink-0 flex items-center gap-1 ${
+              darkMode ? 'text-zinc-500' : 'text-slate-400'
+            }`}>
               <Filter className="w-3.5 h-3.5 text-red-500" /> Genre:
             </span>
 
@@ -159,19 +164,23 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                   triggerHaptic('light');
                   setSelectedGenre(g);
                 }}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap active:scale-95 ${
                   selectedGenre === g
-                    ? 'bg-red-600 text-white shadow-lg shadow-red-600/30'
-                    : 'bg-zinc-900/80 text-zinc-400 border border-white/10 hover:border-zinc-700'
+                    ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 font-extrabold'
+                    : darkMode
+                      ? 'bg-zinc-900/80 text-zinc-400 border border-zinc-800 hover:border-zinc-700'
+                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 shadow-xs'
                 }`}
               >
                 {g}
               </button>
             ))}
 
-            <div className="h-4 w-[1px] bg-white/10 mx-1 shrink-0" />
+            <div className={`h-4 w-[1px] mx-1 shrink-0 ${darkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
 
-            <span className="text-[11px] font-extrabold text-zinc-500 uppercase tracking-wider shrink-0">
+            <span className={`text-[11px] font-extrabold uppercase tracking-wider shrink-0 ${
+              darkMode ? 'text-zinc-500' : 'text-slate-400'
+            }`}>
               Quality:
             </span>
 
@@ -182,10 +191,12 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                   triggerHaptic('light');
                   setSelectedQuality(q);
                 }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap active:scale-95 ${
                   selectedQuality === q
                     ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-zinc-950 font-black shadow-lg'
-                    : 'bg-zinc-900/80 text-zinc-400 border border-white/10 hover:border-zinc-700'
+                    : darkMode
+                      ? 'bg-zinc-900/80 text-zinc-400 border border-zinc-800 hover:border-zinc-700'
+                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 shadow-xs'
                 }`}
               >
                 {q}
@@ -195,9 +206,13 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
         </div>
 
         {/* Results Header Bar with View Mode Toggle */}
-        <div className="max-w-4xl mx-auto w-full flex items-center justify-between mb-4 border-b border-white/5 pb-3">
+        <div className={`max-w-4xl mx-auto w-full flex items-center justify-between mb-4 border-b pb-3 ${
+          darkMode ? 'border-zinc-800/80' : 'border-slate-200'
+        }`}>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+            <span className={`text-xs font-black uppercase tracking-wider flex items-center gap-1.5 ${
+              darkMode ? 'text-zinc-400' : 'text-slate-600'
+            }`}>
               {isFiltered ? (
                 <>
                   <Sparkles className="w-3.5 h-3.5 text-red-500" />
@@ -206,7 +221,7 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
               ) : (
                 <>
                   <Flame className="w-3.5 h-3.5 text-amber-500" />
-                  Trending Library ({filteredMovies.length})
+                  All Synced Library Files ({filteredMovies.length})
                 </>
               )}
             </span>
@@ -221,21 +236,25 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                   setSelectedGenre('All');
                   setSelectedQuality('All');
                 }}
-                className="text-[11px] font-bold text-red-400 hover:underline mr-1"
+                className="text-[11px] font-bold text-red-500 hover:underline mr-1"
               >
                 Reset Filters
               </button>
             )}
 
             {/* View Mode Switcher */}
-            <div className="flex items-center bg-zinc-900 p-1 rounded-xl border border-white/10">
+            <div className={`flex items-center p-1 rounded-xl border ${
+              darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-slate-200/80 border-slate-300/80'
+            }`}>
               <button
                 onClick={() => {
                   triggerHaptic('light');
                   setViewMode('list');
                 }}
                 className={`p-1.5 rounded-lg transition-colors ${
-                  viewMode === 'list' ? 'bg-red-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                  viewMode === 'list' 
+                    ? 'bg-red-600 text-white shadow-sm' 
+                    : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-slate-500 hover:text-slate-800'
                 }`}
                 title="Detailed List View"
               >
@@ -247,7 +266,9 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                   setViewMode('grid');
                 }}
                 className={`p-1.5 rounded-lg transition-colors ${
-                  viewMode === 'grid' ? 'bg-red-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                  viewMode === 'grid' 
+                    ? 'bg-red-600 text-white shadow-sm' 
+                    : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-slate-500 hover:text-slate-800'
                 }`}
                 title="Grid View"
               >
@@ -257,7 +278,7 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
           </div>
         </div>
 
-        {/* Unified Results Section (Single Premium Display) */}
+        {/* Unified Results Section */}
         <div className="max-w-4xl mx-auto w-full flex-1 pb-16">
           {filteredMovies.length > 0 ? (
             viewMode === 'list' ? (
@@ -273,33 +294,51 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                       onSelectMovie(m);
                       onClose();
                     }}
-                    className="p-3.5 rounded-2xl bg-zinc-900/80 border border-white/10 hover:border-red-500/50 hover:bg-zinc-800/80 transition-all flex items-center gap-4 cursor-pointer group shadow-lg"
+                    className={`p-3.5 rounded-2xl border transition-all flex items-center gap-4 cursor-pointer group ${
+                      darkMode 
+                        ? 'bg-zinc-900/80 border-zinc-800/80 hover:border-red-500/50 hover:bg-zinc-800/80 text-white shadow-lg' 
+                        : 'bg-white border-slate-200 hover:border-red-500/50 hover:bg-slate-50 text-slate-900 shadow-sm'
+                    }`}
                   >
                     <img
                       src={m.thumbnail_url}
                       alt={m.title}
-                      className="w-14 h-20 sm:w-16 sm:h-24 object-cover rounded-xl border border-white/10 shrink-0 shadow-md group-hover:scale-105 transition-transform"
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = generateDynamicSVGPoster(m.title, m.genre);
+                      }}
+                      className="w-14 h-20 sm:w-16 sm:h-24 object-cover rounded-xl border border-slate-200/40 dark:border-white/10 shrink-0 shadow-md group-hover:scale-105 transition-transform"
                     />
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-black text-base sm:text-lg text-white group-hover:text-red-400 transition-colors truncate">
+                        <h3 className={`font-black text-base sm:text-lg group-hover:text-red-500 transition-colors truncate ${
+                          darkMode ? 'text-white' : 'text-slate-900'
+                        }`}>
                           {m.title}
                         </h3>
-                        <span className="px-2 py-0.5 text-[11px] font-extrabold bg-zinc-800 text-amber-400 rounded-md shrink-0 flex items-center gap-1 border border-amber-400/20">
+                        <span className={`px-2 py-0.5 text-[11px] font-extrabold rounded-md shrink-0 flex items-center gap-1 border ${
+                          darkMode ? 'bg-zinc-800 text-amber-400 border-amber-400/20' : 'bg-amber-50 text-amber-600 border-amber-200'
+                        }`}>
                           <Star className="w-3 h-3 fill-amber-400" /> {m.rating || '7.5'}
                         </span>
                       </div>
 
-                      <p className="text-xs text-zinc-400 line-clamp-1 mt-1 font-medium">
+                      <p className={`text-xs line-clamp-1 mt-1 font-medium ${
+                        darkMode ? 'text-zinc-400' : 'text-slate-500'
+                      }`}>
                         {m.description}
                       </p>
 
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        <span className="px-2 py-0.5 text-[10px] font-bold bg-zinc-800 text-zinc-300 rounded-md border border-white/5">
+                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md border ${
+                          darkMode ? 'bg-zinc-800 text-zinc-300 border-zinc-700' : 'bg-slate-100 text-slate-600 border-slate-200'
+                        }`}>
                           {m.year}
                         </span>
-                        <span className="px-2 py-0.5 text-[10px] font-bold bg-zinc-800 text-zinc-300 rounded-md border border-white/5">
+                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md border ${
+                          darkMode ? 'bg-zinc-800 text-zinc-300 border-zinc-700' : 'bg-slate-100 text-slate-600 border-slate-200'
+                        }`}>
                           {m.genre}
                         </span>
 
@@ -307,7 +346,7 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                         {(m.sources || []).map((s) => (
                           <span
                             key={s.quality}
-                            className="px-2 py-0.5 text-[10px] font-black bg-red-950/90 text-red-400 rounded-md border border-red-800/40"
+                            className="px-2 py-0.5 text-[10px] font-black bg-red-600/10 text-red-500 rounded-md border border-red-500/20"
                           >
                             {s.quality}
                           </span>
@@ -322,7 +361,7 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                         onPlay(m);
                         onClose();
                       }}
-                      className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-600/40 shrink-0 transform group-hover:scale-110 transition-transform"
+                      className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-600/40 shrink-0 transform group-hover:scale-110 transition-transform active:scale-95"
                       title="Play Stream"
                     >
                       <Play className="w-5 h-5 fill-current ml-0.5" />
@@ -345,7 +384,7 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                         onClose();
                         onPlay(m);
                       }}
-                      darkMode={true}
+                      darkMode={darkMode}
                     />
                   </div>
                 ))}
@@ -353,12 +392,14 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
             )
           ) : (
             /* EMPTY STATE */
-            <div className="flex flex-col items-center justify-center py-20 text-center text-zinc-500">
-              <div className="w-16 h-16 rounded-3xl bg-zinc-900/80 border border-white/10 flex items-center justify-center mb-4 shadow-xl">
-                <Film className="w-8 h-8 text-zinc-600" />
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className={`w-16 h-16 rounded-3xl border flex items-center justify-center mb-4 shadow-xl ${
+                darkMode ? 'bg-zinc-900/80 border-zinc-800 text-zinc-600' : 'bg-white border-slate-200 text-slate-400'
+              }`}>
+                <Film className="w-8 h-8" />
               </div>
-              <p className="font-extrabold text-lg text-zinc-200">No movies found</p>
-              <p className="text-xs mt-1 text-zinc-500 max-w-sm">
+              <p className={`font-extrabold text-lg ${darkMode ? 'text-zinc-200' : 'text-slate-800'}`}>No movies found</p>
+              <p className="text-xs mt-1 text-slate-500 dark:text-zinc-500 max-w-sm">
                 Try searching for titles like "Captain Marvel", years like "2019", or qualities like "1080p".
               </p>
 
@@ -367,7 +408,11 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                   <button
                     key={tag}
                     onClick={() => setQuery(tag)}
-                    className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-white/10 text-xs font-bold text-zinc-400 hover:text-white hover:border-red-500/50 transition-all"
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                      darkMode 
+                        ? 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-red-500/50' 
+                        : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:border-red-500/50 shadow-xs'
+                    }`}
                   >
                     "{tag}"
                   </button>

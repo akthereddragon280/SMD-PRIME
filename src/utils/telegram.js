@@ -67,6 +67,9 @@ export function useTelegramBackButton(onClickHandler) {
  */
 export function getTelegramUserInfo() {
   try {
+    if (typeof window !== 'undefined' && window.Telegram?.WebApp?.initDataUnsafe?.user) {
+      return window.Telegram.WebApp.initDataUnsafe.user;
+    }
     return WebApp?.initDataUnsafe?.user || null;
   } catch (e) {
     return null;

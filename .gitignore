@@ -10,7 +10,16 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
-*.local
+# Secrets & Sensitive Keys
+keys/
+.env
+.dev.vars
+.wrangler/
+*.json
+!package.json
+!package-lock.json
+!tsconfig*.json
+!wrangler.jsonc
 
 # Editor directories and files
 .vscode/*
