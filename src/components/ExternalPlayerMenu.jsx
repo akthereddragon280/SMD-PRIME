@@ -68,8 +68,10 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
   // Clean stream URL (strips quotes or whitespace)
   const cleanUrl = String(streamUrl).trim();
 
-  // 1. VLC URL scheme & official Android intent
-  const vlcUrl = cleanUrl.startsWith('vlc://') ? cleanUrl : `vlc://${cleanUrl.replace(/^vlc:\/\//i, '')}`;
+  // 1. VLC Android Intent (100% reliable inside Android Telegram Mini App WebView)
+  const vlcIntentUrl = `intent:${cleanUrl}#Intent;package=org.videolan.vlc;type=video/*;end;`;
+  // VLC Custom Scheme for iOS / Desktop (e.g., vlc://tgstream.smd-prime.workers.dev/...)
+  const vlcSchemeUrl = cleanUrl.replace(/^https?:\/\//i, 'vlc://');
 
   // 2. MX Player Android Intent
   const mxPlayerUrl = `intent:${cleanUrl}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end;`;
@@ -78,22 +80,29 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
   const systemDefaultUrl = `intent:${cleanUrl}#Intent;action=android.intent.action.VIEW;type=video/*;end;`;
 
   // Bulletproof custom scheme launcher to prevent Telegram Mini App ERR_UNKNOWN_URL_SCHEME errors
-  const handleLaunchPlayer = (e, targetUrl) => {
+  const handleLaunchPlayer = (e, targetUrl, isVlc = false) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
     triggerHaptic('heavy');
 
-    if (!targetUrl) return;
+    let finalUrl = targetUrl;
+    if (isVlc) {
+      // Use Android Intent on Android devices; fallback to vlc:// on iOS/desktop
+      const isAndroid = /android/i.test(navigator.userAgent || '');
+      finalUrl = isAndroid ? vlcIntentUrl : vlcSchemeUrl;
+    }
+
+    if (!finalUrl) return;
 
     try {
       // Direct window location trigger (Android OS catches Intent directly from WebView)
-      window.location.href = targetUrl;
+      window.location.href = finalUrl;
     } catch (err) {
       // Fallback via dynamic link element click
       const a = document.createElement('a');
-      a.href = targetUrl;
+      a.href = finalUrl;
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
       document.body.appendChild(a);
@@ -114,8 +123,8 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
         <div className="grid grid-cols-3 gap-2">
           {/* 1. VLC Player */}
           <a
-            href={vlcUrl}
-            onClick={(e) => handleLaunchPlayer(e, vlcUrl)}
+            href={vlcIntentUrl}
+            onClick={(e) => handleLaunchPlayer(e, vlcIntentUrl, true)}
             className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 transition-all active:scale-95 group shadow-lg cursor-pointer"
             title="Play in VLC Player"
           >
@@ -128,7 +137,7 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
           {/* 2. MX Player */}
           <a
             href={mxPlayerUrl}
-            onClick={(e) => handleLaunchPlayer(e, mxPlayerUrl)}
+            onClick={(e) => handleLaunchPlayer(e, mxPlayerUrl, false)}
             className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-blue-500/10 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 transition-all active:scale-95 group shadow-lg cursor-pointer"
             title="Play in MX Player"
           >
@@ -141,7 +150,7 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
           {/* 3. System Default */}
           <a
             href={systemDefaultUrl}
-            onClick={(e) => handleLaunchPlayer(e, systemDefaultUrl)}
+            onClick={(e) => handleLaunchPlayer(e, systemDefaultUrl, false)}
             className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 transition-all active:scale-95 group shadow-lg cursor-pointer"
             title="Play in System Default Player"
           >
@@ -165,8 +174,8 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
         <div className="grid grid-cols-1 gap-2.5">
           {/* 1. VLC Player */}
           <a
-            href={vlcUrl}
-            onClick={(e) => handleLaunchPlayer(e, vlcUrl)}
+            href={vlcIntentUrl}
+            onClick={(e) => handleLaunchPlayer(e, vlcIntentUrl, true)}
             className="flex items-center justify-between p-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all active:scale-[0.98] group cursor-pointer"
           >
             <div className="flex items-center gap-3">
