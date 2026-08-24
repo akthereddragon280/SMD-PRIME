@@ -433,6 +433,30 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     return `${mins}:${formattedSecs}`;
   };
 
+  // Helper: Transposes touch coordinates when Fake Fullscreen 90-degree rotation is active
+  const getEffectiveCoords = (clientX, clientY) => {
+    if (!isFakeFullscreen) {
+      return {
+        x: clientX,
+        y: clientY,
+        screenWidth: window.innerWidth || 600,
+        screenHeight: window.innerHeight || 400
+      };
+    }
+
+    // 90-degree rotated Fake Fullscreen coordinate transformation:
+    // Physical Top (clientY=0) -> Rotated Left (X=0)
+    // Physical Bottom (clientY=h) -> Rotated Right (X=h)
+    // Physical Right (clientX=w) -> Rotated Top (Y=0)
+    // Physical Left (clientX=0) -> Rotated Bottom (Y=w)
+    return {
+      x: clientY,
+      y: (window.innerWidth || 600) - clientX,
+      screenWidth: window.innerHeight || 600,
+      screenHeight: window.innerWidth || 400
+    };
+  };
+
   // 10. Robust & Refined 3-Zone Gesture Engine
   const lastTouchTimeRef = useRef(0);
 
@@ -444,13 +468,15 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
       lastTouchTimeRef.current = Date.now();
     }
 
+    const coords = getEffectiveCoords(clientX, clientY);
+
     let startVal = 0;
     if (zone === 'left') startVal = brightness;
     else if (zone === 'right') startVal = isMuted ? 0 : volume * 100;
 
     dragRef.current = {
-      startX: clientX,
-      startY: clientY,
+      startX: coords.x,
+      startY: coords.y,
       startVal,
       startSeekTime: videoRef.current ? videoRef.current.currentTime : currentTime,
       zone,
@@ -463,8 +489,9 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     const d = dragRef.current;
     if (!d.zone) return;
 
-    const deltaX = clientX - d.startX;
-    const deltaY = d.startY - clientY; // UP is positive, DOWN is negative
+    const coords = getEffectiveCoords(clientX, clientY);
+    const deltaX = coords.x - d.startX;
+    const deltaY = d.startY - coords.y; // UP is positive, DOWN is negative
 
     if (!d.direction) {
       if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
@@ -486,7 +513,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
 
     if (d.direction === 'horizontal') {
       // Dynamic Horizontal Scrubbing (Duration Seek)
-      const screenWidth = window.innerWidth || 600;
+      const screenWidth = coords.screenWidth;
       const seekDeltaSeconds = Math.round((deltaX / screenWidth) * 120);
       const vidDuration = videoRef.current?.duration || duration || 100;
       const targetTime = Math.max(0, Math.min(vidDuration, d.startSeekTime + seekDeltaSeconds));
@@ -504,14 +531,14 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
       });
     } else if (d.direction === 'vertical') {
       // Vertical Drag (Left = Brightness | Right = Volume)
-      const screenHeight = window.innerHeight || 400;
+      const screenHeight = coords.screenHeight;
       const deltaPercent = (deltaY / (screenHeight * 0.45)) * 100;
 
-      if (d.zone === 'left' || (d.zone === 'center' && d.startX < (window.innerWidth || 600) / 2)) {
+      if (d.zone === 'left' || (d.zone === 'center' && d.startX < coords.screenWidth / 2)) {
         const newBrightness = Math.min(150, Math.max(20, Math.round(d.startVal + deltaPercent * 1.2)));
         setBrightness(newBrightness);
         setGestureHUD({ type: 'brightness', value: newBrightness });
-      } else if (d.zone === 'right' || (d.zone === 'center' && d.startX >= (window.innerWidth || 600) / 2)) {
+      } else if (d.zone === 'right' || (d.zone === 'center' && d.startX >= coords.screenWidth / 2)) {
         const newVolPercent = Math.min(100, Math.max(0, Math.round(d.startVal + deltaPercent * 1.2)));
         const newVol = newVolPercent / 100;
         setVolume(newVol);
