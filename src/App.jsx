@@ -7,10 +7,16 @@ import MovieModal from './components/MovieModal';
 import VideoPlayer from './components/VideoPlayer';
 import SearchOverlay from './components/SearchOverlay';
 import AdminModal from './components/AdminModal';
+import PlayerGateway from './components/PlayerGateway';
 import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
 import { Flame, Zap, Compass, Clapperboard, Smartphone, Monitor, MoreVertical, X, Loader2, Database, Film, History } from 'lucide-react';
 
 export default function App() {
+  // Check if current route is the HTTPS Bounce Gateway
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/player-gate')) {
+    return <PlayerGateway />;
+  }
+
   // Dark mode theme by default
   const [darkMode, setDarkMode] = useState(true);
   const [activeCategory, setActiveCategory] = useState('All');

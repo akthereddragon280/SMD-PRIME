@@ -100,33 +100,18 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
     }
     triggerHaptic('heavy');
 
-    const isAndroid = /android/i.test(navigator.userAgent || '');
-    let targetUrl = '';
+    const rawStreamUrl = urls.raw;
+    if (!rawStreamUrl) return;
 
-    if (playerType === 'vlc') {
-      targetUrl = isAndroid ? urls.vlcIntent : urls.vlcScheme;
-    } else if (playerType === 'mx') {
-      targetUrl = urls.mxIntent;
-    } else if (playerType === 'system') {
-      targetUrl = urls.systemIntent;
-    }
+    // HTTPS Bounce Gateway URL to escape TMA WebView Sandbox
+    const gatewayUrl = `${window.location.origin}/player-gate?app=${encodeURIComponent(playerType)}&url=${encodeURIComponent(rawStreamUrl)}`;
 
-    if (!targetUrl) return;
-
-    try {
-      // Direct window location navigation (Android WebView passes intent directly to OS)
-      window.location.href = targetUrl;
-    } catch (err) {
-      // Fallback via dynamic link click
-      const a = document.createElement('a');
-      a.href = targetUrl;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try { document.body.removeChild(a); } catch (e) {}
-      }, 500);
+    if (window.Telegram?.WebApp?.openLink) {
+      // Use Telegram WebApp API to open HTTPS gateway in external system browser (Chrome/Safari)
+      window.Telegram.WebApp.openLink(gatewayUrl);
+    } else {
+      // Standard browser popup fallback
+      window.open(gatewayUrl, '_blank');
     }
   };
 
