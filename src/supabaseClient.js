@@ -270,6 +270,18 @@ export async function upsertTelegramUser(tgUser) {
   };
 
   try {
+    // 0. Check if user is marked as admin in Supabase users table
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('role')
+      .eq('telegram_user_id', userIdInt)
+      .limit(1)
+      .maybeSingle();
+
+    if (userRow && userRow.role === 'admin') {
+      import('./utils/admin').then(({ addAdminUser }) => addAdminUser(userIdInt)).catch(() => {});
+    }
+
     // 1. Try standard upsert with onConflict
     const { data, error } = await supabase
       .from('users')

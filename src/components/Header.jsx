@@ -99,6 +99,20 @@ export default function Header({
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
 
+            {/* Direct Admin Command Center Button (Visible for Admins) */}
+            {isAdminUser(telegramUser?.id) && (
+              <button
+                onClick={() => {
+                  triggerHaptic('heavy');
+                  onOpenAdmin();
+                }}
+                className="p-2.5 rounded-full bg-gradient-to-tr from-red-600 to-rose-600 text-white border border-red-500/40 shadow-lg shadow-red-600/30 flex items-center justify-center active:scale-95 animate-pulse"
+                title="Open Admin Command Center"
+              >
+                <ShieldAlert className="w-4 h-4 stroke-[2.5]" />
+              </button>
+            )}
+
             {/* Telegram User Indicator & Avatar Button */}
             <div className={`flex items-center gap-2 pl-2 border-l ${darkMode ? 'border-zinc-800' : 'border-slate-200'}`}>
               <button

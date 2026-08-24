@@ -1,7 +1,12 @@
 import { updateUserAdminStatus } from '../supabaseClient';
 
 // Initial Default Super Admin Telegram User IDs (e.g. 0 for dev localhost)
-const DEFAULT_ADMIN_IDS = [0];
+const ENV_ADMIN_IDS = (import.meta.env?.VITE_ADMIN_TELEGRAM_IDS || '')
+  .split(',')
+  .map(id => Number(id.trim()))
+  .filter(id => !isNaN(id));
+
+const DEFAULT_ADMIN_IDS = Array.from(new Set([0, ...ENV_ADMIN_IDS]));
 
 /**
  * Get current list of Admin Telegram User IDs
