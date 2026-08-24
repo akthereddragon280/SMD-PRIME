@@ -15,6 +15,7 @@ import {
 } from '../supabaseClient';
 import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
+import ExternalPlayerMenu from './ExternalPlayerMenu';
 
 export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) {
   const videoRef = useRef(null);
@@ -64,6 +65,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
 
   // Layout, Controls Auto-Fade & Gesture Overlay
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFakeFullscreen, setIsFakeFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [touchFeedback, setTouchFeedback] = useState(null);
   const [gestureHUD, setGestureHUD] = useState(null); // { type: 'brightness'|'volume'|'seek', value: string|number, timeFormatted?: string }
@@ -378,6 +380,41 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     }
   };
 
+  // 9b. Fullscreen Engine: Native requestFullscreen + Telegram Mini App CSS Fake Landscape Hack
+  const toggleFullscreen = async () => {
+    triggerHaptic('medium');
+
+    // Rule 1: Always call expand() on Telegram WebApp
+    if (window.Telegram?.WebApp?.expand) {
+      window.Telegram.WebApp.expand();
+    }
+
+    if (!isFakeFullscreen && !document.fullscreenElement) {
+      try {
+        if (containerRef.current?.requestFullscreen) {
+          await containerRef.current.requestFullscreen();
+        }
+        if (window.screen?.orientation?.lock) {
+          await window.screen.orientation.lock('landscape');
+        }
+        setIsFullscreen(true);
+      } catch (err) {
+        // Fallback for Telegram Mini App or devices blocking orientation lock
+        setIsFakeFullscreen(true);
+        setIsFullscreen(true);
+      }
+    } else {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+      if (window.screen?.orientation?.unlock) {
+        window.screen.orientation.unlock().catch(() => {});
+      }
+      setIsFakeFullscreen(false);
+      setIsFullscreen(false);
+    }
+  };
+
   // Time Formatter (Digital Clock format: e.g. 33:12, 1:21:00)
   const formatTime = (timeInSeconds) => {
     if (isNaN(timeInSeconds) || timeInSeconds <= 0) return '0:00';
@@ -522,31 +559,6 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     dragRef.current = { startX: 0, startY: 0, startVal: 0, startSeekTime: 0, zone: null, direction: null, isMoved: false };
   };
 
-  // 11. Fullscreen & Orientation Lock Toggle
-  const toggleFullscreen = () => {
-    triggerHaptic('medium');
-    const container = document.getElementById('vlc-player-container');
-    if (!container) return;
-
-    if (!document.fullscreenElement) {
-      if (container.requestFullscreen) container.requestFullscreen();
-      setIsFullscreen(true);
-      try {
-        if (screen.orientation && screen.orientation.lock) {
-          screen.orientation.lock('landscape').catch(() => {});
-        }
-      } catch (e) {}
-    } else {
-      if (document.exitFullscreen) document.exitFullscreen();
-      setIsFullscreen(false);
-      try {
-        if (screen.orientation && screen.orientation.unlock) {
-          screen.orientation.unlock();
-        }
-      } catch (e) {}
-    }
-  };
-
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const volumePercent = isMuted ? 0 : Math.min(100, Math.max(0, volume * 100));
 
@@ -571,7 +583,11 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="fixed inset-0 h-[100dvh] w-[100dvw] z-50 bg-black flex flex-col items-center justify-between overflow-hidden select-none touch-none"
+        className={
+          isFakeFullscreen
+            ? "fixed top-0 left-[100%] w-[100vh] h-[100vw] origin-top-left rotate-90 z-[99999] bg-black flex flex-col items-center justify-between overflow-hidden select-none touch-none"
+            : "fixed inset-0 h-[100dvh] w-[100dvw] z-50 bg-black flex flex-col items-center justify-between overflow-hidden select-none touch-none"
+        }
       >
         {/* 2026 Hyper-Premium SMD Cinematic Loader */}
         <AnimatePresence>
@@ -819,6 +835,11 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                               <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
                             </div>
                           </button>
+
+                          {/* External Player Menu Integration */}
+                          <div className="pt-2 border-t border-zinc-800">
+                            <ExternalPlayerMenu streamUrl={activeVideoUrl} movieTitle={movieTitle} />
+                          </div>
                         </div>
                       )}
 

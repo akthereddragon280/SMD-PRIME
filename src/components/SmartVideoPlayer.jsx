@@ -3,6 +3,7 @@ import { Play, Download, AlertTriangle, Film, ShieldCheck, Cpu, HardDrive, Refre
 import { getProxyStreamUrl } from '../utils/proxy';
 import { logDownloadAnalytics } from '../supabaseClient';
 import { getTelegramUserInfo } from '../utils/telegram';
+import ExternalPlayerMenu from './ExternalPlayerMenu';
 
 /**
  * HELPER: Calculates optimal streaming source based on strict business logic.
@@ -231,6 +232,9 @@ export default function SmartVideoPlayer({ movie, sources = [] }) {
           </div>
         </div>
       )}
+
+      {/* 1b. EXTERNAL PLAYER INTENTS (VLC, MX PLAYER, SYSTEM DEFAULT) */}
+      <ExternalPlayerMenu streamUrl={playableUrl} movieTitle={movie?.title} />
 
       {/* 2. OMNI-DOWNLOAD SECTION (IGNORES 4GB RULE) */}
       <div className="rounded-3xl border border-white/10 bg-zinc-900/80 p-6 backdrop-blur-xl space-y-4">
