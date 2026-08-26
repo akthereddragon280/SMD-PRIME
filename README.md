@@ -134,6 +134,6 @@ npm run lint
 # Compile production bundle
 npm run build
 
-# Preview production build locally
+# Preview production build locally..
 npm run preview
 ```
