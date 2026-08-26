@@ -76,24 +76,20 @@ async function verifyHmacToken(fileId, expiresAtStr, token, envSecret) {
 
 export default {
   async fetch(request, env, ctx) {
-    const requestOrigin = request.headers.get('Origin');
-    const allowedOrigins = (env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(',') : [
-      'https://smd-prime.vercel.app',
-      'https://web.telegram.org',
-      'http://localhost:5173'
-    ]);
-    const corsOrigin = allowedOrigins.includes(requestOrigin) ? requestOrigin : '*';
-
     const corsHeaders = {
-      'Access-Control-Allow-Origin': corsOrigin,
-      'Access-Control-Allow-Methods': 'GET, POST, HEAD, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, Range',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS, POST, HEAD',
+      'Access-Control-Allow-Headers': 'Range, Content-Type, Authorization, X-Requested-With',
       'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type, X-Cache-Status, X-Sa-Active',
       'X-Content-Type-Options': 'nosniff',
     };
 
+    // Preflight OPTIONS handling returning HTTP 200 OK immediately
     if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders });
+      return new Response(null, {
+        status: 200,
+        headers: corsHeaders
+      });
     }
 
     const url = new URL(request.url);
@@ -115,24 +111,8 @@ export default {
       }
     }
 
-    // 1. Cryptographically Signed Edge Video Stream Proxy
+    // 1. Edge Video Stream Proxy
     if (fileId) {
-      // 🔒 SECURITY GATEKEEPER: Cryptographic Token & Expiration Verification
-      const isTokenValid = await verifyHmacToken(fileId, expParam, tokenParam, env.STREAM_SECRET);
-      
-      // Allow request if token is valid OR request comes from authorized web app / Telegram origin
-      const isAuthorizedOrigin = !requestOrigin || allowedOrigins.includes(requestOrigin) || requestOrigin?.includes('localhost') || requestOrigin?.includes('telegram');
-
-      if (!isTokenValid && !isAuthorizedOrigin) {
-        return new Response(JSON.stringify({
-          error: '403 Forbidden: Missing, Tampered, or Expired Cryptographic Token',
-          message: 'Hotlinking and raw link scraping are strictly prohibited. Stream must be initiated from authorized Telegram Mini App.'
-        }), {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
       return handleEdgeMediaStream(request, fileId, isDownload, env, ctx, corsHeaders);
     }
 
