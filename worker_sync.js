@@ -585,10 +585,23 @@ async function handleGoogleDriveStreamWithMultiSA(request, fileId, isDownload, e
     }
   }
 
-  // If ALL Service Accounts in the mesh fail
-  return lastErrorRes || new Response(JSON.stringify({ 
+  // If ALL Service Accounts fail or hit Google Drive quotas/errors, return CORS-compliant JSON error
+  if (lastErrorRes) {
+    const errorHeaders = new Headers(corsHeaders);
+    errorHeaders.set('Content-Type', 'application/json');
+    const status = lastErrorRes.status >= 400 ? lastErrorRes.status : 403;
+    return new Response(JSON.stringify({
+      error: `Upstream Service Account Error (HTTP ${status})`,
+      message: 'Google Drive quota exceeded or service account permission error across all nodes.'
+    }), {
+      status,
+      headers: errorHeaders
+    });
+  }
+
+  return new Response(JSON.stringify({ 
     error: 'All Service Accounts Exceeded Google Drive Quota',
-    message: 'All configured SAs have reached Google Drive daily limits. Add more SAs to environment variables.'
+    message: 'All configured SAs have reached Google Drive daily limits.'
   }), { 
     status: 429, 
     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
