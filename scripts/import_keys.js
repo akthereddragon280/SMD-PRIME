@@ -9,7 +9,7 @@ const wranglerPath = path.join(__dirname, '..', 'wrangler.jsonc');
 async function importKeys() {
   console.log('Reading Service Account JSON files from:', keysDir);
   const files = fs.readdirSync(keysDir).filter(f => f.endsWith('.json'));
-  
+
   if (files.length === 0) {
     console.log('No JSON files found in keys directory.');
     return;
@@ -48,12 +48,12 @@ async function importKeys() {
       console.log(`${fileName} not found. Skipping.`);
       return;
     }
-    
+
     let content = fs.readFileSync(filePath, 'utf-8');
-    
+
     // Remove individual GOOGLE_SA lines
     content = content.replace(/^GOOGLE_SA\d+[\s\S]*?(?=^[\w]+=|$)/gm, '');
-    
+
     // Remove if SERVICE_ACCOUNTS_JSON already exists
     content = content.replace(/^SERVICE_ACCOUNTS_JSON=[\s\S]*?(?=^[\w]+=|$)/gm, '');
 
@@ -62,7 +62,7 @@ async function importKeys() {
 
     // Append new variable
     content = content.trim() + '\n\n' + envReadyStr + '\n';
-    
+
     fs.writeFileSync(filePath, content, 'utf-8');
     console.log(`Updated ${fileName}`);
   };
@@ -73,24 +73,24 @@ async function importKeys() {
   // Update wrangler.jsonc carefully
   if (fs.existsSync(wranglerPath)) {
     let wranglerContent = fs.readFileSync(wranglerPath, 'utf-8');
-    
+
     // We will parse it and rewrite it. Wrangler files are typically valid JSONC.
     // For safety, we will use JSON.parse assuming it doesn't have active comments, 
     // or we'll inject using regex string replacement in the vars block.
-    
+
     // We already cleaned wrangler.jsonc previously. Let's use JSON.parse.
     try {
       const jsonc = JSON.parse(wranglerContent);
       if (!jsonc.vars) jsonc.vars = {};
-      
+
       // Delete old variables if they exist
       for (let i = 1; i <= 20; i++) {
         delete jsonc.vars[`GOOGLE_SA${i}`];
       }
-      
+
       // Inject new array
       jsonc.vars.SERVICE_ACCOUNTS_JSON = saJsonString;
-      
+
       fs.writeFileSync(wranglerPath, JSON.stringify(jsonc, null, 2), 'utf-8');
       console.log('Updated wrangler.jsonc');
     } catch (parseError) {
@@ -102,3 +102,4 @@ async function importKeys() {
 }
 
 importKeys();
+
