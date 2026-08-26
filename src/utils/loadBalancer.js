@@ -19,11 +19,24 @@ export function getOptimalWorkerUrl() {
 }
 
 /**
+ * 3. Returns the NEXT worker URL in the pool when current node fails (Client-Side Failover).
+ * @param {string} currentUrl - Current active worker URL
+ * @returns {string} Next fallback worker URL
+ */
+export function getNextWorkerUrl(currentUrl = '') {
+  if (!currentUrl) return getOptimalWorkerUrl();
+  const currentIndex = workers.findIndex(w => currentUrl.includes(w) || w.includes(currentUrl));
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % workers.length : 0;
+  return workers[nextIndex];
+}
+
+/**
  * Helper to generate stream URL for HTML5 video player integration
  * @param {string} fileId - Google Drive / Storage file ID
  * @returns {string} Fully routed video stream URL
  */
 export function buildVideoStreamUrl(fileId) {
   const baseUrl = getOptimalWorkerUrl();
-  return `${baseUrl}/?id=${encodeURIComponent(fileId)}`;
+  return `${baseUrl}/?id=${encodeURIComponent(fileId)}&container=mp4&progressive=1`;
 }
+

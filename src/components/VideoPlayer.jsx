@@ -14,7 +14,7 @@ import {
   logStreamAnalytics, 
   formatDurationString 
 } from '../supabaseClient';
-import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
+import { getProxyStreamUrl, downloadMovieStream, rotateStreamUrlNode } from '../utils/proxy';
 import { getOptimalWorkerUrl } from '../utils/loadBalancer';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 import ExternalPlayerMenu from './ExternalPlayerMenu';
@@ -247,36 +247,34 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     return () => clearTimeout(timer);
   }, [loading, activeVideoUrl]);
 
-  // Adaptive Stream Recovery & Container Fallback Engine
+  // Adaptive Stream Recovery & Instant Multi-Node Failover Engine
   const handleVideoError = (err) => {
-    console.warn('[Video Engine Warning] Native browser HTML5 decoder encountered container issue, initiating adaptive fallback:', err);
-    if (retryCount === 0) {
-      setRetryCount(1);
+    console.warn('[Video Engine Warning] Segment or node error encountered, rotating edge node silently:', err);
+    if (retryCount < 6) {
+      const nextCount = retryCount + 1;
+      setRetryCount(nextCount);
       setLoading(true);
-      setActiveVideoUrl(prev => `${prev.replace(/&container=.*$/, '')}&container=mp4&progressive=1`);
+      
+      const savedTime = videoRef.current ? videoRef.current.currentTime : currentTimeRef.current;
+      const rotatedUrl = rotateStreamUrlNode(activeVideoUrl);
+      console.log(`[Node Failover #${nextCount}] Rotating stream host to:`, rotatedUrl);
+      
+      setActiveVideoUrl(rotatedUrl);
+      
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.load();
+          if (savedTime > 0) videoRef.current.currentTime = savedTime;
           videoRef.current.play().catch(() => {});
         }
-      }, 250);
-    } else if (retryCount === 1) {
-      setRetryCount(2);
-      setLoading(true);
-      setActiveVideoUrl(prev => `${prev.replace(/&container=.*$/, '')}&container=webm&progressive=1`);
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.load();
-          videoRef.current.play().catch(() => {});
-        }
-      }, 250);
+      }, 200);
     } else {
-      // Clean Error Recovery: Stop loader & set video error state instead of loading dummy sample video
-      console.warn('[Video Engine] All container retries exhausted for stream proxy.');
+      console.warn('[Video Engine] All node retries exhausted.');
       setLoading(false);
       setVideoError(true);
     }
   };
+
 
   // 2. Play / Pause Handler
   const togglePlay = () => {

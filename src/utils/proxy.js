@@ -1,4 +1,4 @@
-import { getOptimalWorkerUrl } from './loadBalancer';
+import { getOptimalWorkerUrl, getNextWorkerUrl } from './loadBalancer';
 
 /**
  * Dynamic Proxy Stream Integration with Cryptographic HMAC Token Signing
@@ -53,10 +53,12 @@ export function extractCleanDriveFileId(rawInput) {
 
 /**
  * Returns an obfuscated, HMAC-signed streaming URL routed via the 3-Node Load Balancer.
- * Fixes double query parameter concatenation (/?id=/?id=) and enforces load-balanced node routing.
+ * Forces MP4/Progressive playback (container=mp4&progressive=1) across mobile and desktop.
  * 
  * @param {string} fileId - The raw Google Drive file ID or pre-formatted input
- * @returns {string} Dynamic load-balanced & cryptographically signed streaming URL with exactly ONE /?id=
+ * @param {string} title - Optional movie title
+ * @param {string} quality - Optional stream quality
+ * @returns {string} Dynamic load-balanced & cryptographically signed streaming URL
  */
 export function getProxyStreamUrl(fileId, title = '', quality = '') {
   if (!fileId) return '';
@@ -73,11 +75,36 @@ export function getProxyStreamUrl(fileId, title = '', quality = '') {
   // Dynamic Load Balancer Node Selection (always uses getOptimalWorkerUrl())
   const baseUrl = getOptimalWorkerUrl().replace(/\/+$/, '');
 
-  let url = `${baseUrl}/?id=${encodeURIComponent(cleanId)}&fid=${encodeURIComponent(obfuscatedFid)}&exp=${expiresAt}&token=${token}`;
+  // FORCE MP4 / PROGRESSIVE: Always append container=mp4&progressive=1
+  let url = `${baseUrl}/?id=${encodeURIComponent(cleanId)}&fid=${encodeURIComponent(obfuscatedFid)}&exp=${expiresAt}&token=${token}&container=mp4&progressive=1`;
   if (title) url += `&title=${encodeURIComponent(title)}`;
   if (quality) url += `&quality=${encodeURIComponent(quality)}`;
   return url;
 }
+
+/**
+ * Rotates worker host URL in an existing stream URL to the NEXT available node in the pool.
+ * Used for automatic seamless client-side node failover when a node returns 403 or 500.
+ * 
+ * @param {string} currentUrl - Active stream URL
+ * @returns {string} Stream URL with rotated node host
+ */
+export function rotateStreamUrlNode(currentUrl = '') {
+  if (!currentUrl) return getProxyStreamUrl('1djKAD3UQmBPgkeBBLCrZjAW-D4Fod_Ng');
+  const nextWorkerBase = getNextWorkerUrl(currentUrl).replace(/\/+$/, '');
+  
+  try {
+    const parsed = new URL(currentUrl);
+    // Replace origin with next worker node origin
+    const nextOrigin = new URL(nextWorkerBase).origin;
+    return `${nextOrigin}${parsed.pathname}${parsed.search}`;
+  } catch (e) {
+    // If URL parsing fails, extract file ID and rebuild stream URL
+    const cleanId = extractCleanDriveFileId(currentUrl);
+    return getProxyStreamUrl(cleanId);
+  }
+}
+
 
 export const DEMO_SAMPLE_STREAMS = [
   'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
