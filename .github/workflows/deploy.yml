@@ -22,9 +22,11 @@ jobs:
           vars: |
             SUPABASE_URL
             SUPABASE_ANON_KEY
+            SERVICE_ACCOUNTS_JSON
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SERVICE_ACCOUNTS_JSON: ${{ secrets.SERVICE_ACCOUNTS_JSON }}
 
       - name: Deploy Stream Node 2
         uses: cloudflare/wrangler-action@v3
@@ -35,9 +37,11 @@ jobs:
           vars: |
             SUPABASE_URL
             SUPABASE_ANON_KEY
+            SERVICE_ACCOUNTS_JSON
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SERVICE_ACCOUNTS_JSON: ${{ secrets.SERVICE_ACCOUNTS_JSON }}
 
       - name: Deploy Stream Node 3
         uses: cloudflare/wrangler-action@v3
@@ -48,6 +52,8 @@ jobs:
           vars: |
             SUPABASE_URL
             SUPABASE_ANON_KEY
+            SERVICE_ACCOUNTS_JSON
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SERVICE_ACCOUNTS_JSON: ${{ secrets.SERVICE_ACCOUNTS_JSON }}
