@@ -1,689 +1,105 @@
 /**
- * SMD PRIME - CLOUDFLARE R2 & GOOGLE DRIVE ZERO-BUFFERING EDGE STREAMING WORKER
- * Production-Grade Distributed Edge Infrastructure Engine with Cloudflare Cache API (caches.default),
- * Immutable Cache-Control Mesh, Async Edge Put (ctx.waitUntil), Multi-SA Round-Robin Failover,
- * Range-Parser, TransformStream Pipelining, and Zero-Buffer Memory Footprint.
+ * SMD PRIME - CLOUDFLARE MULTI-NODE EDGE STREAMING WORKER
+ * Hybrid Service Account Architecture with Hardcoded Local Fallback, Safe Supabase DB Fetch,
+ * Zero-Buffer Range Pipelining, and Global Cross-Origin Resource Sharing (CORS) Enforcement.
  */
-
-const TMDB_GENRE_MAP = {
-  28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
-  99: 'Documentary', 18: 'Drama', 10751: 'Family', 14: 'Fantasy', 36: 'History',
-  27: 'Horror', 10402: 'Music', 9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi',
-  10770: 'TV Movie', 53: 'Thriller', 10752: 'War', 37: 'Western'
-};
 
 const STREAM_SECRET = 'smd_prime_secure_jwt_secret_key_2026';
 
 /**
- * Fast synchronous token hash verification fallback
+ * 1. HARDCODED FALLBACK SERVICE ACCOUNTS
+ * Guaranteed local fallback if Supabase DB is down, timing out, or empty.
  */
-function verifyFastTokenSync(fileId, expiresAtStr, token) {
-  const str = `${fileId}:${expiresAtStr}:${STREAM_SECRET}`;
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  const expected = Math.abs(hash).toString(16).padStart(8, '0');
-  return token === expected;
-}
-
-/**
- * Cryptographic HMAC SHA-256 Verification Gatekeeper
- */
-async function verifyHmacToken(fileId, expiresAtStr, token, envSecret) {
-  if (!fileId || !expiresAtStr || !token) return false;
-  
-  const exp = parseInt(expiresAtStr, 10);
-  const now = Math.floor(Date.now() / 1000);
-  
-  // Reject expired tokens
-  if (isNaN(exp) || now > exp) {
-    return false;
-  }
-
-  const secret = envSecret || STREAM_SECRET;
-
-  if (verifyFastTokenSync(fileId, expiresAtStr, token)) {
-    return true;
-  }
-
-  try {
-    const message = `${fileId}:${exp}`;
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const messageData = encoder.encode(message);
-
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw',
-      keyData,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['verify', 'sign']
-    );
-
-    const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData);
-    const expectedHex = Array.from(new Uint8Array(signature))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-
-    return token === expectedHex;
-  } catch (err) {
-    return false;
-  }
-}
-
-export default {
-  async fetch(request, env, ctx) {
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS, POST, HEAD',
-      'Access-Control-Allow-Headers': 'Range, Content-Type, Authorization, X-Requested-With',
-      'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type, X-Cache-Status, X-Sa-Active',
-      'X-Content-Type-Options': 'nosniff',
-    };
-
-    // Preflight OPTIONS handling returning HTTP 200 OK immediately
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 200,
-        headers: corsHeaders
-      });
-    }
-
-    const url = new URL(request.url);
-    const rawFidParam = url.searchParams.get('fid');
-    const rawIdParam = url.searchParams.get('id');
-    const expParam = url.searchParams.get('exp');
-    const tokenParam = url.searchParams.get('token');
-    const isDownload = url.searchParams.has('download') || url.searchParams.has('dl');
-
-    // Extract & Decode File ID securely
-    let fileId = rawIdParam; // Always prefer the raw ID directly
-    if (!fileId && rawFidParam) {
-      try {
-        let b64 = rawFidParam;
-        while (b64.length % 4 !== 0) b64 += '=';
-        fileId = atob(b64);
-      } catch (e) {
-        fileId = rawFidParam;
-      }
-    }
-
-    // 1. Edge Video Stream Proxy
-    if (fileId) {
-      return handleEdgeMediaStream(request, fileId, isDownload, env, ctx, corsHeaders);
-    }
-
-    // 2. Health & Manual Sync Route
-    if (url.pathname === '/sync' || url.searchParams.has('sync')) {
-      try {
-        const summary = await triggerDriveToSupabaseSync(env);
-        return new Response(JSON.stringify({ success: true, message: 'Drive-to-Supabase Sync Completed!', summary }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      } catch (err) {
-        return new Response(JSON.stringify({ success: false, error: err.message }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-    }
-
-    // Default Gateway Status Output
-    return new Response(JSON.stringify({ 
-      status: 'online', 
-      service: 'SMD PRIME Edge Infrastructure Gateway v6.0 (Cloudflare Cache API + TransformStream + SA Mesh)',
-      usage: '/?fid=YOUR_BASE64_FILE_ID'
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+const FALLBACK_SERVICE_ACCOUNTS = [
+  {
+    email: "tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com",
+    privateKey: "-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDH/ZrgLW4U9Bhi\nHCKkwxrjJ/YhruF9kQONhMbZnvpeHFQb3+Tyc/sv1nrl0XkJ/NhittZ7zTGqQHhM\nbmxs76TWGCi/cK9e5bzO1jj+p/GxY2GnnOBQr3VMVGldpoS/9RrE00dN+RRLbrR6\nwNzWk+zjMNINE7bhKDDBjCzZMzOeJYbzjArls4GcgPYBNOmUDx31s1PSagpBAwzc\nzKJNSmJlDraWrbEvYWRHpgZbVXmfy0Dc+6cOs61Y6NpScHDVPe7lNpnr3HXzW/KA\nm8f04Gd5V+VLBV9aYLPx013S/cvb7/qcKMnwU3VBPTAlsK8TrRdx1JrVXFA1E4Bd\nKQq8Yg5PAgMBAAECggEAD+n3TAVxcAtocU4p15CK8C564H1JBjPm43kAVcrXw2tf\nqgQr9LsT7t+TUfxUNF5BXcGM2bcfT5vntrVGvXhoVnz/qRQvcE65sn/Lc0Ar9GCj\nIbJTCzibDeLdq40XnSrE4YqqbuL2IXaCuA3mxNBqlj2JSW8bK1mGX7Bm1TXE0r2n\ntNDu8bOapl4vt2g+Y+ad8ArC5oDOO+NaVGoDtHGvcBQAeEuKebmLLeIj0Aa8luFr\nYPTyZWvcOwdqeM4dYmiLfYSvCXFtys0NXeJ86KLw71RuD+ox2fSiR6EvvRPmk2SL\nPRx923xjRnMP9tclJuKFht1KnjDhGgwVjStK0dSIOQKBgQDoD/oD/WhPR9RyEdfU\n9gN+QZH+TILiXcbTZ+D2fGFVDlg5F+9nhpmBLeB20/frC1JyofWmxy11578YegKW\nwbdYD55jJ/fwBsPidPhBT3R/2HlzMj1VCIVwDtqKkorn9Rsr/byD+XdjLMIrW3/p\nmwnFHsW5G8lmZYPEpgH+f4+LpQKBgQDcnrdMJBtEsQTGB2tTiuZ4pTjNMICShjtH\n8xAW5/aOs0YAAjQc7RAaG9FbY06ahwViXPonPPUgRwNLud3pwlXyYe6VZyPvTq6J\ni1OrA+Bdhvskw7KAa8BzcOo6RuWtfxmZX7/TGMSqtMoILoX9lCTZAZQ7uxI8ewVS\nTv40x3tf4wKBgQCei6PNrAji+Xk8wdIKrlWuoc/DxLQ7QcSAVN1OqaW5/cXqo96t\nhTlFF3ne1WzxCdg3d02ktzno7v8REvLH2uuPX4RfzEPJmmWkRzQBMu6uFdDMEkvy\n15KK/6rxt7LtTPlWcdGk/QBDIqY6BxZ6HLFtGlwN3t0Xd02yQZTlMnN4/QKBgQCx\n2cEqQHE7DvkqKxD6aB8jYw5HW7JKbKuddPSjgpvgreTgXOZl6zXv1j0Pzx6us+pD\nQXDn8NwrCRQ/F7ctmtxuaURMbLkrUeKiPw9T7ewReZ88JAbiP/sFFSG9mSnOk4ev\nfODG7FCezN+ReO/LXIHX7s3w2P36g7HmiIelRKrQwQKBgQCxydU5F191YOg/G3mF\nKg0ETT8SygNgvM/mLLPX6tr4pR85E5ju35uy56xj0MHfnW+Qg2FcwVhPwQNUcCqu\nd6ddgLdaVx1V7kLqQW0soiGdf3J1bM4JH/rFW1gPcmhBUWLGGQDyyk3eOsK+3CzT\nfOPlZNKYGtgFbD+AgdhoQx5MNA==\n-----END PRIVATE KEY-----\n"
   },
-
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(triggerDriveToSupabaseSync(env));
+  {
+    email: "tgstream-bot-2@tgstream-drive-proxy.iam.gserviceaccount.com",
+    privateKey: "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCpPGCGJjve2SM7\nB0Dv8fcUNV2seJ/Y94ap2oD1j4HGbuPhHEUmQUCq5Wqr4HN9zyVKY09LGQAw/MY7\nDBrT7P7k8B6e+TUtOMqhBBAgm/E6WeHZuUR4z84P2B3iOymLfWoD8pv/ekwC+vsF\n86bnvNXg+N7M8gMojNd3gB0XoU87wkUlQf1igK2AV/eAs2+tjZOS5KvZC/XemSBc\nvV9tNKOoZ03XAXJeX0hBeTZXSoLU6yXTXBXQerV0htydx9gjKnioBn7ayRNK1i3L\nWdIedraSEiIRM6WYoJkkZ68SLag20ci+gl3Y+9D3QxB99/eGZu6Q4RYr7FlHAK4U\ndAnzciHFAgMBAAECggEATcIQF5M5rwrVxSlwDM+AVyiuAbDqwSX6GdDrr+hgGGyb\nB7OVkh4pOFxwxsg6SHQFDkjTBg5WqCt8aWUGbplWBJrPdvvKEx0k/RaA0nrUO5tQ\nylj1vQy+AUmrcWb9j7nwHCA8zQXEJxpqfDGXXqLFIrk2pbQM/3S3C5ExzMmxPiMl\ncu6c1Dkeggdx6LNNU+lm/3Ep87pixUqlTadR1CyzSJFZK8JFB5s3Kod69OT234MM\ng/V8r54NOvCG2985s0BDIKMZ4A8qyLOMcTnzxtD5IQaMy7mB1nzT9mNSw2DLUhRD\nFvHet/zJbv6jab+/cbKH4ZNloVN/zBuvfDSUf6pPgQKBgQDY17Nit6qLEk4ewgkC\n0APfaqYeimjEE+PoEdsEcnBPLEpCZg7t+ctDrGaHIfLc5Skkk38tayd083tc04mK\nI3jvoRD2jgGY+rGQyeLMgJ4fxyQy/FbQ/ioYwit8tm45NWqM/5uSJ3+EwyCUnhbA\nkojprSiCNqfuAcrrpttWpwjSxwKBgQDHy+Pk6cQFFu542HddTBHFw+yVsvzHsdZR\n7keQEVwSMhOCFH0e1Xou+TMDB+kYbpXUktJK1bodMnD1e5GkFPb9dRY5pnqqzqkx\nxutq0CKWXhyb81jFO4dHoj3AT+IhlSFoifIJoxrkLhS5jw3Au/GpTzinGPbf+8ts\nzQ1ErHSbEwKBgEbEPlrdLd8tHimTkXVFhb4IBCa7bO1wwFQgX6XX4yczgRiiTgUE\nHH39aYh4X9YPQ5oYOM0Nx1a3j27/6kcWxIUPv4V3WrYeOozSFh4/a1tblki9aWfT\nStHBrIeK0fYBpMBXOuI72bXuKFfYL/yw1dXNGQdF5xAZrauyTKq+4HZJAoGBAIlH\nWLDixiLRHM2/vlRGfjeqZRZ+wxza3m2xEU61/tMpwSmxtj7HY4p/A0Pj3Y9B/ITw\n1LlCnPyOufqSCwH4vbRtDPZToxlVof9ntD3SANHcnD+zNp1eR5c6rL9EpBV7CFdx\n4PIqNcHuv6K33jU9bdBtdHmrt4Uy1xVM1v8Gl6AtAoGAQF83Ewp39E98mJCKMNeJ\n1LjPx1c8uFmPjw3i0XWUGKYSBhSckNBuoe35RGujQQy5ScaXGUjgN510Og/0+34Y\nn8Pk3tL44WEcs9ULQXFoWGBCEslbZoO1RjcCPckcLM+9SlrBPj7DTfhQFLlSQTjy\nbMmqArLWoY4bzJxd8zMc1k8=\n-----END PRIVATE KEY-----\n"
   }
-};
+];
+
+// Simple 10-minute in-memory cache for fetched SAs
+let saMemoryCache = null;
+let saMemoryCacheTime = 0;
+const SA_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 /**
- * Modular Edge Media Stream Handler with R2 Primary & Multi-SA Google Drive Failover
+ * 2. SAFE SUPABASE SA FETCH WITH FOOLPROOF FALLBACK
  */
-async function handleEdgeMediaStream(request, fileId, isDownload, env, ctx, corsHeaders) {
-  try {
-    const rangeHeader = request.headers.get('Range');
-
-    // Strategy 1: Attempt Cloudflare R2 Bucket Lookup (If R2 Binding `env.R2_BUCKET` exists)
-    if (env.R2_BUCKET) {
-      try {
-        const r2Object = await env.R2_BUCKET.get(fileId, {
-          range: rangeHeader ? parseRangeHeader(rangeHeader) : undefined
-        });
-
-        if (r2Object) {
-          const responseHeaders = new Headers(corsHeaders);
-          r2Object.writeHttpMetadata(responseHeaders);
-          responseHeaders.set('Accept-Ranges', 'bytes');
-          responseHeaders.set('Connection', 'keep-alive');
-          responseHeaders.set('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
-          responseHeaders.set('X-Cache-Status', 'HIT-R2-EDGE');
-          responseHeaders.set('X-Sa-Active', 'CLOUDFLARE-R2-BUCKET');
-
-          if (isDownload) {
-            let rawTitle = url.searchParams.get('title') || 'Movie';
-            let rawQuality = url.searchParams.get('quality') || '';
-            let cleanName = `${rawTitle}${rawQuality ? '_' + rawQuality : ''}`.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().replace(/\s+/g, '_');
-            cleanName = cleanName.replace(/^(SMD_PRIME_|SMD_PRIME|SMD_|Movie_|Movie)/i, '').replace(/^_+/, '');
-            if (!cleanName) cleanName = 'Movie';
-            const filename = `SMD_${cleanName}.mp4`;
-            responseHeaders.set('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
-            responseHeaders.set('Content-Type', 'application/octet-stream');
-          } else {
-            responseHeaders.set('Content-Type', 'video/mp4');
-          }
-
-          const status = r2Object.range ? 206 : 200;
-          return new Response(r2Object.body, {
-            status,
-            headers: responseHeaders
-          });
-        }
-      } catch (r2Err) {
-        console.warn('R2 Bucket lookup fallback to Google Drive:', r2Err.message);
-      }
-    }
-
-    // Strategy 2: Multi-Service Account Google Drive Stream Pipelining with Request Collapsing & KV L1 Cache
-    const requestKey = `${fileId}:${rangeHeader || 'bytes=0-'}:${isDownload ? 'dl' : 'inline'}`;
-
-    // Request Collapsing / In-Flight Deduplication: If identical chunk request is currently in-flight, await and clone
-    if (inFlightStreamRequests.has(requestKey)) {
-      console.log(`[Request Collapsing HIT] Multiplexing in-flight stream request for key: ${requestKey}`);
-      try {
-        const existingRes = await inFlightStreamRequests.get(requestKey);
-        return existingRes.clone();
-      } catch (e) {
-        inFlightStreamRequests.delete(requestKey);
-      }
-    }
-
-    const streamPromise = handleGoogleDriveStreamWithMultiSA(request, fileId, isDownload, env, ctx, corsHeaders);
-    inFlightStreamRequests.set(requestKey, streamPromise);
-
-    try {
-      const response = await streamPromise;
-      return response;
-    } finally {
-      inFlightStreamRequests.delete(requestKey);
-    }
-  } catch (err) {
-    return new Response(JSON.stringify({ error: 'Edge Stream Proxy Failure', message: err.message }), { 
-      status: 500, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
-  }
-}
-
-/**
- * Parse Range Header (e.g. "bytes=0-1048575") into R2 range specifier
- */
-function parseRangeHeader(rangeHeader) {
-  const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
-  if (!match) return undefined;
-  const offset = parseInt(match[1], 10);
-  const end = match[2] ? parseInt(match[2], 10) : undefined;
-  if (end !== undefined) {
-    return { offset, length: end - offset + 1 };
-  }
-  return { offset };
-}
-
-// Global In-Memory Cache for Service Accounts fetched from Supabase DB
-let cachedSAs = null;
-let cacheTimestamp = 0;
-const SA_CACHE_TTL_MS = 60 * 60 * 1000; // 1 Hour (3,600,000 ms)
-
-/**
- * Fetch active Google Drive Service Accounts from Supabase REST DB (`drive_service_accounts`)
- */
-async function fetchServiceAccountsFromDB(env) {
-  let supabaseUrl = env?.SUPABASE_URL;
-  let supabaseKey = env?.SUPABASE_ANON_KEY || env?.SUPABASE_SERVICE_ROLE_KEY || env?.SUPABASE_KEY;
-
-  if (!supabaseUrl || typeof supabaseUrl !== 'string' || !supabaseUrl.startsWith('http')) {
-    supabaseUrl = 'https://iwulcblngplsjtsipods.supabase.co';
-  }
-  if (!supabaseKey || typeof supabaseKey !== 'string' || supabaseKey.length < 20) {
-    supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3dWxjYmxuZ3Bsc2p0c2lwb2RzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzA0MTA2MywiZXhwIjoyMTAyNjE3MDYzfQ.X61a2cj17Zs8Q-0-Pe1ku1PMi_uiybIlYFLv61d8tDU';
+async function getServiceAccounts(env) {
+  const now = Date.now();
+  if (saMemoryCache && saMemoryCache.length > 0 && (now - saMemoryCacheTime < SA_CACHE_TTL)) {
+    return saMemoryCache;
   }
 
   try {
+    const supabaseUrl = env?.SUPABASE_URL || 'https://iwulcblngplsjtsipods.supabase.co';
+    const supabaseKey = env?.SUPABASE_ANON_KEY || env?.SUPABASE_SERVICE_ROLE_KEY || env?.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3dWxjYmxuZ3Bsc2p0c2lwb2RzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzA0MTA2MywiZXhwIjoyMTAyNjE3MDYzfQ.X61a2cj17Zs8Q-0-Pe1ku1PMi_uiybIlYFLv61d8tDU';
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500); // 2.5s strict timeout
+
     const res = await fetch(`${supabaseUrl}/rest/v1/drive_service_accounts?is_active=eq.true&select=*`, {
       method: 'GET',
       headers: {
         'apikey': supabaseKey,
         'Authorization': `Bearer ${supabaseKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: controller.signal
     });
 
-    if (!res.ok) {
-      console.warn(`[SA DB Fetch Error] HTTP ${res.status}: ${res.statusText}`);
-      return [];
-    }
+    clearTimeout(timeoutId);
 
-    const rows = await res.json();
-    if (!Array.isArray(rows) || rows.length === 0) {
-      console.warn('[SA DB Fetch] No active service accounts returned from DB.');
-      return [];
-    }
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows.length > 0) {
+        const list = [];
+        const seen = new Set();
 
-    const list = [];
-    const emailsSeen = new Set();
-
-    rows.forEach(r => {
-      const email = r.email || r.client_email;
-      let key = r.private_key || r.privateKey;
-
-      if (email && key && !emailsSeen.has(email)) {
-        emailsSeen.add(email);
-        list.push({
-          email: email.trim(),
-          privateKey: key.trim()
+        rows.forEach(r => {
+          const email = r.email || r.client_email;
+          const key = r.private_key || r.privateKey;
+          if (email && key && !seen.has(email)) {
+            seen.add(email);
+            list.push({ email: email.trim(), privateKey: key.trim() });
+          }
         });
+
+        if (list.length > 0) {
+          saMemoryCache = list;
+          saMemoryCacheTime = now;
+          console.log(`[SA Fetch Success] Cached ${list.length} accounts from Supabase.`);
+          return saMemoryCache;
+        }
       }
-    });
-
-    return list;
+    }
   } catch (err) {
-    console.error('[SA DB Fetch Exception]:', err.message);
-    return [];
+    console.warn('[SA Fetch Warning] Supabase DB fetch failed or timed out. Falling back to local SAs:', err.message);
   }
+
+  // Fallback to local hardcoded accounts
+  saMemoryCache = FALLBACK_SERVICE_ACCOUNTS;
+  saMemoryCacheTime = now;
+  return saMemoryCache;
 }
 
-/**
- * Get Service Account List with 1-Hour Edge Cache & Graceful Fallback
- */
-async function getServiceAccountList(env) {
-  const now = Date.now();
+// Token cache to prevent redundant OAuth token calls
+const tokenCache = new Map();
 
-  // 1. Return from In-Memory Cache if fresh (< 1 Hour)
-  if (cachedSAs && cachedSAs.length > 0 && (now - cacheTimestamp < SA_CACHE_TTL_MS)) {
-    return cachedSAs;
-  }
-
-  // 2. Fetch fresh SAs from Supabase DB `drive_service_accounts`
-  const freshSAs = await fetchServiceAccountsFromDB(env);
-  if (freshSAs && freshSAs.length > 0) {
-    cachedSAs = freshSAs;
-    cacheTimestamp = now;
-    console.log(`[SA Cache Refresh] Successfully cached ${freshSAs.length} SAs from Supabase DB.`);
-    return cachedSAs;
-  }
-
-  // 3. Fallback to stale cached data if DB is temporarily unreachable
-  if (cachedSAs && cachedSAs.length > 0) {
-    console.warn('[SA Cache Fallback] DB fetch failed. Using stale cached SAs.');
-    return cachedSAs;
-  }
-
-  // 4. Fallback to GOOGLE_SA1..10 environment variables if DB table is empty
-  const fallbackList = [];
-  const emailsSeen = new Set();
-  const addSa = (email, privateKey) => {
-    if (email && privateKey && !emailsSeen.has(email)) {
-      emailsSeen.add(email);
-      fallbackList.push({ email: email.trim(), privateKey: privateKey.trim() });
-    }
-  };
-
-  for (let idx = 1; idx <= 10; idx++) {
-    const saVar = env[`GOOGLE_SA${idx}`];
-    if (saVar) {
-      try {
-        const parsed = typeof saVar === 'string' ? JSON.parse(saVar) : saVar;
-        if (parsed) addSa(parsed.client_email || parsed.email, parsed.private_key || parsed.privateKey);
-      } catch (e) {}
-    }
-  }
-
-  if (env.GOOGLE_PRIVATE_KEY) {
-    addSa(env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 'tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com', env.GOOGLE_PRIVATE_KEY);
-  }
-
-  if (fallbackList.length > 0) {
-    cachedSAs = fallbackList;
-    cacheTimestamp = now;
-    return fallbackList;
-  }
-
-  return [];
-}
-
-// In-Memory Caches & Request Collapsing / Deduplication Maps for Cloudflare Workers Edge Node
-const tokenCache = new Map(); // { email: { token, expiresAt } }
-const inFlightTokenPromises = new Map(); // { email: Promise<token> }
-const inFlightStreamRequests = new Map(); // { key: Promise<Response> }
-
-/**
- * Cached & In-Flight Deduplicated OAuth Token Fetcher
- */
-async function getCachedOrFetchGoogleAccessToken(email, privateKey) {
+async function getAccessToken(email, privateKey) {
   const now = Math.floor(Date.now() / 1000);
-  
-  // 1. Return from in-memory token cache if valid for at least 5 more minutes
   const cached = tokenCache.get(email);
   if (cached && cached.expiresAt > now + 300) {
     return cached.token;
   }
 
-  // 2. Deduplicate simultaneous in-flight token requests for the same SA
-  if (inFlightTokenPromises.has(email)) {
-    return inFlightTokenPromises.get(email);
-  }
-
-  const tokenPromise = (async () => {
-    try {
-      const token = await getGoogleAccessToken(email, privateKey);
-      if (token) {
-        tokenCache.set(email, {
-          token,
-          expiresAt: now + 3500 // OAuth tokens are valid for 3600 seconds
-        });
-      }
-      return token;
-    } finally {
-      inFlightTokenPromises.delete(email);
-    }
-  })();
-
-  inFlightTokenPromises.set(email, tokenPromise);
-  return tokenPromise;
-}
-
-/**
- * Google Drive Stream Proxy with Cloudflare Cache API (caches.default), Immutable Cache-Control Mesh,
- * Distributed SA Mesh, Dynamic DB Rotation, Auto-Heal Quota Bypass,
- * and Async Edge Storage (ctx.waitUntil).
- */
-async function handleGoogleDriveStreamWithMultiSA(request, fileId, isDownload, env, ctx, corsHeaders) {
-  const serviceAccounts = await getServiceAccountList(env);
-
-  if (!serviceAccounts || serviceAccounts.length === 0) {
-    return new Response(JSON.stringify({ error: 'No Active Service Account Credentials Available' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
-  }
-
-  const rangeHeader = request.headers.get('Range');
-  const url = new URL(request.url);
-  let lastErrorRes = null;
-
-  // Randomly select starting SA to balance traffic evenly across all 16 DB accounts
-  const startIdx = Math.floor(Math.random() * serviceAccounts.length);
-
-  // L1 KV Metadata Cache Check (If `env.KV_CACHE` is bound)
-  if (env.KV_CACHE) {
-    try {
-      const cachedMeta = await env.KV_CACHE.get(`meta:${fileId}`, 'json');
-      if (cachedMeta && cachedMeta.driveUrl && cachedMeta.expiresAt > Math.floor(Date.now() / 1000)) {
-        // Use cached direct resolution metadata if present
-        console.log(`[KV Cache HIT] Found metadata for file: ${fileId}`);
-      }
-    } catch (kvErr) {
-      console.warn('[KV Cache Lookup Error]:', kvErr.message);
-    }
-  }
-
-  for (let attempt = 0; attempt < serviceAccounts.length; attempt++) {
-    const i = (startIdx + attempt) % serviceAccounts.length;
-    const sa = serviceAccounts[i];
-    const token = await getCachedOrFetchGoogleAccessToken(sa.email, sa.privateKey);
-
-    // If token generation fails for this SA, skip immediately to avoid unauthenticated 403 requests
-    if (!token) {
-      console.warn(`[SA Mesh] SA #${i + 1} (${sa.email}) token generation returned null. Skipping to next SA...`);
-      continue;
-    }
-
-    const driveUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-    const headers = new Headers();
-    headers.set('Authorization', `Bearer ${token}`);
-
-    // Forward Range header if explicitly requested by client; do NOT force bytes=0- on downloads to prevent 51.2MB Google Drive truncation
-    if (rangeHeader) {
-      headers.set('Range', rangeHeader);
-    } else if (!isDownload) {
-      headers.set('Range', 'bytes=0-');
-    }
-
-    // Retries for network glitch resilience
-    let driveRes = null;
-    for (let retry = 0; retry < 3; retry++) {
-      try {
-        driveRes = await fetch(driveUrl, { 
-          method: request.method,
-          headers 
-        });
-
-        if (driveRes.ok || driveRes.status === 206 || driveRes.status === 403 || driveRes.status === 429) {
-          break;
-        }
-      } catch (fErr) {
-        console.warn(`[SA Fetch Error] SA #${i + 1} (${sa.email}) retry ${retry + 1}/3:`, fErr.message);
-      }
-      await new Promise(r => setTimeout(r, 200 * (retry + 1)));
-    }
-
-    if (!driveRes) continue;
-
-    // Auto-Heal: Check if Google Drive returned 403 / 404 / 429 quota, permission or rate limits
-    if (driveRes.status === 403 || driveRes.status === 404 || driveRes.status === 429) {
-      const clone = driveRes.clone();
-      const text = await clone.text();
-      if (
-        driveRes.status === 429 ||
-        driveRes.status === 404 ||
-        text.includes('downloadQuotaExceeded') ||
-        text.includes('rateLimitExceeded') ||
-        text.includes('usageLimits') ||
-        text.includes('quotaExceeded') ||
-        text.includes('userRateLimitExceeded') ||
-        text.includes('notFound') ||
-        text.includes('fileNotFound') ||
-        text.includes('insufficientFilePermissions') ||
-        text.includes('cannotAccessFile')
-      ) {
-        console.warn(`[SA Mesh Auto-Heal] SA #${i + 1} (${sa.email}) error (HTTP ${driveRes.status}). Rotating to SA #${((i + 1) % serviceAccounts.length) + 1}...`);
-        lastErrorRes = driveRes;
-        continue; // Instantly rotate to next SA token in memory
-      }
-    }
-
-    if (driveRes.ok || driveRes.status === 206) {
-      // -----------------------------------------------------------------------
-      // PREPARE STREAMING HEADERS & SA TELEMETRY
-      // -----------------------------------------------------------------------
-      const responseHeaders = new Headers(corsHeaders);
-
-      const forwardHeaders = [
-        'content-length',
-        'content-range',
-        'accept-ranges',
-        'etag',
-        'last-modified'
-      ];
-
-      forwardHeaders.forEach(h => {
-        const val = driveRes.headers.get(h);
-        if (val) responseHeaders.set(h, val);
-      });
-
-      const requestedMime = url.searchParams.get('mime') || url.searchParams.get('container');
-
-      if (isDownload) {
-        let rawTitle = url.searchParams.get('title') || 'Movie';
-        let rawQuality = url.searchParams.get('quality') || '';
-        let cleanName = `${rawTitle}${rawQuality ? '_' + rawQuality : ''}`.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().replace(/\s+/g, '_');
-        cleanName = cleanName.replace(/^(SMD_PRIME_|SMD_PRIME|SMD_|Movie_|Movie)/i, '').replace(/^_+/, '');
-        if (!cleanName) cleanName = 'Movie';
-        const filename = `SMD_${cleanName}.mp4`;
-
-        responseHeaders.set('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
-        responseHeaders.set('Content-Type', 'application/octet-stream');
-        responseHeaders.set('Content-Transfer-Encoding', 'binary');
-      } else {
-        responseHeaders.set('Content-Disposition', 'inline');
-        const rawContentType = driveRes.headers.get('content-type') || '';
-        if (requestedMime) {
-          responseHeaders.set('Content-Type', requestedMime.includes('/') ? requestedMime : `video/${requestedMime}`);
-        } else if (!rawContentType || rawContentType.includes('matroska') || rawContentType.includes('mkv') || rawContentType.includes('octet-stream')) {
-          responseHeaders.set('Content-Type', 'video/mp4');
-        } else {
-          responseHeaders.set('Content-Type', rawContentType);
-        }
-      }
-
-      // Enterprise Headers, Range Support & Service Account Telemetry
-      responseHeaders.set('Accept-Ranges', 'bytes');
-      responseHeaders.set('Connection', 'keep-alive');
-      responseHeaders.set('Cache-Control', 'public, max-age=14400, s-maxage=86400, stale-while-revalidate=86400');
-      responseHeaders.set('X-Cache-Status', `MESH-HEALTHY (SA:${i + 1}/${serviceAccounts.length})`);
-      responseHeaders.set('X-Sa-Active', sa.email);
-      responseHeaders.set('X-Sa-Index', `${i + 1}`);
-
-      let status = driveRes.status;
-      if (status === 206 && !responseHeaders.get('Content-Range')) {
-        status = 200;
-      }
-
-      // Direct body stream pass-through preserves exact Content-Length for Chrome/Edge native progress bar (% & time remaining)
-      return new Response(driveRes.body, {
-        status,
-        statusText: driveRes.statusText,
-        headers: responseHeaders
-      });
-    }
-
-    lastErrorRes = driveRes;
-  }
-
-  // Strategy 3: Fallback to Cloudflare R2 bucket if configured and ALL SAs hit quota limit
-  if (env.R2) {
-    try {
-      const r2Object = await env.R2.get(`movies/${fileId}.mp4`);
-      if (r2Object) {
-        const r2Headers = new Headers(corsHeaders);
-        r2Headers.set('Content-Type', isDownload ? 'application/octet-stream' : 'video/mp4');
-        r2Headers.set('Accept-Ranges', 'bytes');
-        r2Headers.set('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
-        r2Headers.set('X-Cache-Status', 'PROXY-R2-FALLBACK');
-        r2Headers.set('X-Sa-Active', 'CLOUDFLARE-R2-BUCKET');
-        return new Response(r2Object.body, { status: 200, headers: r2Headers });
-      }
-    } catch (r2Err) {
-      console.error('[R2 Fallback Error]:', r2Err.message);
-    }
-  }
-
-  // If ALL Service Accounts fail or hit Google Drive quotas/errors, return CORS-compliant JSON error
-  if (lastErrorRes) {
-    const errorHeaders = new Headers(corsHeaders);
-    errorHeaders.set('Content-Type', 'application/json');
-    const status = lastErrorRes.status >= 400 ? lastErrorRes.status : 403;
-    return new Response(JSON.stringify({
-      error: `Upstream Service Account Error (HTTP ${status})`,
-      message: 'Google Drive quota exceeded or service account permission error across all nodes.'
-    }), {
-      status,
-      headers: errorHeaders
-    });
-  }
-
-  return new Response(JSON.stringify({ 
-    error: 'All Service Accounts Exceeded Google Drive Quota',
-    message: 'All configured SAs have reached Google Drive daily limits.'
-  }), { 
-    status: 429, 
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-  });
-}
-
-/**
- * Drive-to-Supabase Sync Pipeline Engine
- */
-export async function triggerDriveToSupabaseSync(env) {
-  const SUPABASE_URL = env.SUPABASE_URL || 'https://iwulcblngplsjtsipods.supabase.co';
-  const SUPABASE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY;
-  const FOLDER_ID = env.GOOGLE_DRIVE_FOLDER_ID || '13QLJomTi-5IA4Jjz7TOMSEKwalE6mSCt';
-  const serviceAccounts = await getServiceAccountList(env);
-  const sa = serviceAccounts[0];
-
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
-    throw new Error('Supabase credentials missing.');
-  }
-
-  const token = await getGoogleAccessToken(sa.email, sa.privateKey);
-  const files = await fetchDriveFiles(token, FOLDER_ID);
-  const summary = [];
-
-  for (const file of files) {
-    const { cleanTitle, year, quality, uid } = parseFileName(file.name);
-
-    const mRes = await fetch(`${SUPABASE_URL}/rest/v1/movies`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
-      },
-      body: JSON.stringify({
-        uid,
-        title: cleanTitle,
-        original_title: cleanTitle,
-        overview: 'High quality cinema stream loaded live from SMD Prime Cloud Cinema Library.',
-        release_year: year,
-        rating: 7.5,
-        genres: ['Action', 'Drama']
-      })
-    });
-
-    const sRes = await fetch(`${SUPABASE_URL}/rest/v1/movie_sources`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
-      },
-      body: JSON.stringify({
-        movie_uid: uid,
-        quality,
-        drive_file_id: file.id,
-        file_size: file.size ? `${Math.round(file.size / (1024 * 1024))} MB` : '1.2 GB',
-        audio_languages: ['Tam', 'Tel', 'Hin', 'Eng'],
-        sa_account_index: 1
-      })
-    });
-
-    summary.push({ uid, title: cleanTitle, quality, status: mRes.ok && sRes.ok ? 'SYNCED' : 'PARTIAL' });
-  }
-
-  return summary;
-}
-
-/**
- * Generate Google OAuth Token via Web Crypto RSA-SHA256
- */
-async function getGoogleAccessToken(email, privateKeyRaw) {
   try {
-    if (!privateKeyRaw) return null;
-    const privateKey = privateKeyRaw.replace(/\\n/g, '\n');
-
+    const formattedKey = privateKey.replace(/\\n/g, '\n');
     const header = { alg: 'RS256', typ: 'JWT' };
-    const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: email,
       scope: 'https://www.googleapis.com/auth/drive.readonly',
@@ -692,33 +108,29 @@ async function getGoogleAccessToken(email, privateKeyRaw) {
       iat: now
     };
 
-    const base64UrlEncode = (obj) =>
-      btoa(typeof obj === 'string' ? obj : JSON.stringify(obj))
-        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const b64Url = (obj) => btoa(typeof obj === 'string' ? obj : JSON.stringify(obj))
+      .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 
-    const signatureInput = `${base64UrlEncode(header)}.${base64UrlEncode(payload)}`;
-    
-    const binaryDerString = atob(privateKey.replace(/-----[^-]+-----|\s/g, ''));
-    const binaryDer = new Uint8Array(binaryDerString.length);
-    for (let i = 0; i < binaryDerString.length; i++) {
-      binaryDer[i] = binaryDerString.charCodeAt(i);
-    }
+    const signatureInput = `${b64Url(header)}.${b64Url(payload)}`;
+    const derString = atob(formattedKey.replace(/-----[^-]+-----|\s/g, ''));
+    const der = new Uint8Array(derString.length);
+    for (let i = 0; i < derString.length; i++) der[i] = derString.charCodeAt(i);
 
     const cryptoKey = await crypto.subtle.importKey(
       'pkcs8',
-      binaryDer.buffer,
+      der.buffer,
       { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
       false,
       ['sign']
     );
 
-    const signatureBuffer = await crypto.subtle.sign(
+    const sigBuffer = await crypto.subtle.sign(
       'RSASSA-PKCS1-v1_5',
       cryptoKey,
       new TextEncoder().encode(signatureInput)
     );
 
-    const signature = btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)))
+    const signature = btoa(String.fromCharCode(...new Uint8Array(sigBuffer)))
       .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 
     const jwt = `${signatureInput}.${signature}`;
@@ -733,74 +145,189 @@ async function getGoogleAccessToken(email, privateKeyRaw) {
     });
 
     const data = await res.json();
-    return data.access_token || null;
-  } catch (err) {
-    return null;
-  }
-}
-
-/**
- * Fetch Drive Files Helper
- */
-async function fetchDriveFiles(accessToken, folderId) {
-  if (!accessToken) return [];
-  try {
-    const url = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=files(id,name,size,mimeType)&pageSize=1000`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    const data = await res.json();
-    if (data.files) {
-      return data.files.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
+    if (data.access_token) {
+      tokenCache.set(email, { token: data.access_token, expiresAt: now + 3500 });
+      return data.access_token;
     }
-  } catch (err) {}
-  return [];
+  } catch (err) {
+    console.error(`[Token Error] Failed to generate token for ${email}:`, err.message);
+  }
+  return null;
 }
 
+export default {
+  async fetch(request, env, ctx) {
+    // 4. GLOBAL CORS HEADERS ENFORCEMENT
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS, POST, HEAD',
+      'Access-Control-Allow-Headers': 'Range, Content-Type, Authorization, X-Requested-With',
+      'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type, X-Cache-Status, X-Sa-Active',
+      'X-Content-Type-Options': 'nosniff',
+    };
+
+    // Preflight OPTIONS handling returning 200 OK immediately
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 200, headers: corsHeaders });
+    }
+
+    try {
+      const url = new URL(request.url);
+      const rawFidParam = url.searchParams.get('fid');
+      const rawIdParam = url.searchParams.get('id');
+      const isDownload = url.searchParams.has('download') || url.searchParams.has('dl');
+
+      let fileId = rawIdParam;
+      if (!fileId && rawFidParam) {
+        try {
+          let b64 = rawFidParam;
+          while (b64.length % 4 !== 0) b64 += '=';
+          fileId = atob(b64);
+        } catch (e) {
+          fileId = rawFidParam;
+        }
+      }
+
+      if (fileId) {
+        return await handleStream(request, fileId, isDownload, env, corsHeaders);
+      }
+
+      return new Response(JSON.stringify({ 
+        status: 'online', 
+        service: 'SMD PRIME Multi-Node Hybrid Stream Engine v8.0',
+        usage: '/?id=YOUR_GOOGLE_DRIVE_FILE_ID'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    } catch (fatalErr) {
+      console.error('[Fatal Worker Error]:', fatalErr.message);
+      return new Response(JSON.stringify({ 
+        error: 'Internal Gateway Error', 
+        message: fatalErr.message 
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+  }
+};
+
 /**
- * Advanced Filename Sanitizer
+ * 3. ZERO-BUFFERING STREAM & ROTATION PIPELINE
  */
-function parseFileName(fullName) {
-  let name = fullName.trim();
-  name = name.replace(/\.(mkv|mp4|avi|mov|flv|webm)$/i, '');
-  name = name.replace(/^Copy\s*(\(\d+\))?\s*of\s+/i, '');
-  name = name.replace(/^@[A-Za-z0-9_.\s]+?[-:]\s*/i, ''); 
-  name = name.replace(/^@[A-Za-z0-9_.\s]{2,40}\s{2,}/i, '');
-  name = name.replace(/^@[A-Za-z0-9_.]+\s*/i, '');
-  name = name.replace(/^(https?:\/\/)?(www\.)?[A-Za-z0-9.-]+\.[A-Za-z]{2,6}(\.[A-Za-z]{2,4})?\s*[-:_]*\s*/i, '');
+async function handleStream(request, fileId, isDownload, env, corsHeaders) {
+  const serviceAccounts = await getServiceAccounts(env);
+  const rangeHeader = request.headers.get('Range');
+  const url = new URL(request.url);
 
-  name = name.replace(/[-_.]/g, ' ').replace(/\s+/g, ' ');
+  // Pick random starting index to distribute load across accounts
+  const startIdx = Math.floor(Math.random() * serviceAccounts.length);
+  let lastError = null;
 
-  const yearMatch = name.match(/\b(19\d\d|20[0-3]\d)\b/);
-  const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
+  for (let attempt = 0; attempt < serviceAccounts.length; attempt++) {
+    const idx = (startIdx + attempt) % serviceAccounts.length;
+    const sa = serviceAccounts[idx];
+    const token = await getAccessToken(sa.email, sa.privateKey);
 
-  let quality = '1080p';
-  if (/(2160p|4K)/i.test(fullName)) quality = '4K';
-  else if (/1080p/i.test(fullName)) quality = '1080p';
-  else if (/720p/i.test(fullName)) quality = '720p';
-  else if (/480p/i.test(fullName)) quality = '480p';
+    if (!token) continue;
 
-  let cleanTitle = name;
-  if (yearMatch) {
-    cleanTitle = cleanTitle.substring(0, yearMatch.index);
-  } else {
-    cleanTitle = cleanTitle.replace(/\b(2160p|4K|1080p|720p|480p|HDRip|WEB-DL|BluRay|BRRip|DVDRip|HQ|x264|x265|HEVC)\b.*/i, '');
+    const driveUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    const headers = new Headers();
+    headers.set('Authorization', `Bearer ${token}`);
+
+    if (rangeHeader) {
+      headers.set('Range', rangeHeader);
+    } else if (!isDownload) {
+      headers.set('Range', 'bytes=0-');
+    }
+
+    try {
+      const driveRes = await fetch(driveUrl, { 
+        method: request.method, 
+        headers 
+      });
+
+      if (driveRes.ok || driveRes.status === 206) {
+        const responseHeaders = new Headers(corsHeaders);
+
+        ['content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified'].forEach(h => {
+          const val = driveRes.headers.get(h);
+          if (val) responseHeaders.set(h, val);
+        });
+
+        const requestedMime = url.searchParams.get('mime') || url.searchParams.get('container');
+
+        if (isDownload) {
+          let rawTitle = url.searchParams.get('title') || 'Movie';
+          let rawQuality = url.searchParams.get('quality') || '';
+          let cleanName = `${rawTitle}${rawQuality ? '_' + rawQuality : ''}`.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().replace(/\s+/g, '_');
+          cleanName = cleanName.replace(/^(SMD_PRIME_|SMD_PRIME|SMD_|Movie_|Movie)/i, '').replace(/^_+/, '');
+          if (!cleanName) cleanName = 'Movie';
+          const filename = `SMD_${cleanName}.mp4`;
+
+          responseHeaders.set('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+          responseHeaders.set('Content-Type', 'application/octet-stream');
+        } else {
+          responseHeaders.set('Content-Disposition', 'inline');
+          const rawContentType = driveRes.headers.get('content-type') || '';
+          if (requestedMime) {
+            responseHeaders.set('Content-Type', requestedMime.includes('/') ? requestedMime : `video/${requestedMime}`);
+          } else if (!rawContentType || rawContentType.includes('matroska') || rawContentType.includes('mkv') || rawContentType.includes('octet-stream')) {
+            responseHeaders.set('Content-Type', 'video/mp4');
+          } else {
+            responseHeaders.set('Content-Type', rawContentType);
+          }
+        }
+
+        responseHeaders.set('Accept-Ranges', 'bytes');
+        responseHeaders.set('Cache-Control', 'public, max-age=14400, s-maxage=86400, stale-while-revalidate=86400');
+        responseHeaders.set('X-Sa-Active', sa.email);
+        responseHeaders.set('X-Sa-Index', `${idx + 1}`);
+
+        let status = driveRes.status;
+        if (status === 206 && !responseHeaders.get('Content-Range')) {
+          status = 200;
+        }
+
+        return new Response(driveRes.body, {
+          status,
+          statusText: driveRes.statusText,
+          headers: responseHeaders
+        });
+      }
+
+      // Check quota error & rotate
+      if (driveRes.status === 403 || driveRes.status === 404 || driveRes.status === 429) {
+        console.warn(`[SA Quota Rotate] SA #${idx + 1} (${sa.email}) returned HTTP ${driveRes.status}. Rotating...`);
+        lastError = driveRes;
+        continue;
+      }
+    } catch (fetchErr) {
+      console.warn(`[Drive Fetch Err] SA #${idx + 1}:`, fetchErr.message);
+    }
   }
 
-  cleanTitle = cleanTitle
-    .replace(/\[.*?\]/g, '')
-    .replace(/\(.*?\)/g, '')
-    .replace(/\b(BluRay|HDRp|HQ|HDRip|WEB-DL|HDR|x264|x265|HEVC|DD\+5\.1|ESub|MSub|AAC|Tamil|Tam|Tel|Hin|Eng|TRUE|S\d+|^EP.*)\b/gi, '')
-    .replace(/[-_.:()]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  cleanTitle = cleanTitle.replace(/^(promo|vip|official|hd|hq)\s+/i, '').trim();
-
-  if (!cleanTitle || cleanTitle.length < 2) {
-    cleanTitle = fullName.replace(/\.(mkv|mp4|avi)$/i, '').replace(/[-_.]/g, ' ').trim();
+  // If all SAs failed, return CORS-compliant error
+  const errHeaders = new Headers(corsHeaders);
+  errHeaders.set('Content-Type', 'application/json');
+  
+  if (lastError) {
+    const status = lastError.status >= 400 ? lastError.status : 403;
+    return new Response(JSON.stringify({ 
+      error: 'Upstream Stream Error', 
+      status, 
+      message: 'Service Account quota exceeded or permission denied on Google Drive.' 
+    }), {
+      status,
+      headers: errHeaders
+    });
   }
 
-  const uid = `${cleanTitle.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${year || 2026}`;
-  return { cleanTitle, year: year || 2026, quality, uid };
+  return new Response(JSON.stringify({ 
+    error: 'All Service Accounts Failed', 
+    message: 'Unable to stream file from Google Drive.' 
+  }), {
+    status: 503,
+    headers: errHeaders
+  });
 }
