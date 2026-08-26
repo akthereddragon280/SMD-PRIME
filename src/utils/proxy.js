@@ -1,17 +1,20 @@
+import { getOptimalWorkerUrl } from './loadBalancer';
+
 /**
  * Dynamic Proxy Stream Integration with Cryptographic HMAC Token Signing
- * Endpoint: https://tgstream.smd-prime.workers.dev/
+ * Integrated with 3-Node Multi-Worker Load Balancer
  */
 
-export const WORKER_BASE_HOST = (import.meta.env?.WORKER_PROXY_URL || import.meta.env?.VITE_WORKER_PROXY_URL || 'https://tgstream.smd-prime.workers.dev')
-  .replace(/\?id=.*$/, '')
-  .replace(/\/$/, '');
+export function getWorkerBaseHost() {
+  const envUrl = import.meta.env?.WORKER_PROXY_URL || import.meta.env?.VITE_WORKER_PROXY_URL;
+  const rawUrl = envUrl || getOptimalWorkerUrl();
+  return rawUrl.replace(/\?id=.*$/, '').replace(/\/+$/, '');
+}
+
+export const WORKER_BASE_HOST = getWorkerBaseHost();
 
 const STREAM_SECRET = import.meta.env?.VITE_STREAM_SECRET || 'smd_prime_secure_jwt_secret_key_2026';
 
-/**
- * Fast Synchronous HMAC/Hash Token Generator for Client Performance
- */
 /**
  * Fast Synchronous Token Generator for Client Performance
  */
@@ -27,12 +30,11 @@ function generateFastTokenSync(fileId, expiresAt) {
 }
 
 /**
- * Returns an obfuscated, HMAC-signed streaming URL.
- * Includes both 'id' for active Cloudflare Worker compatibility
- * and 'fid', 'exp', 'token' for updated HMAC security verification.
+ * Returns an obfuscated, HMAC-signed streaming URL routed via the 3-Node Load Balancer.
+ * Includes 'id', 'fid', 'exp', and 'token' for updated HMAC security verification.
  * 
  * @param {string} fileId - The raw Google Drive file ID
- * @returns {string} Fully compatible & cryptographically signed streaming URL
+ * @returns {string} Dynamic load-balanced & cryptographically signed streaming URL
  */
 export function getProxyStreamUrl(fileId, title = '', quality = '') {
   if (!fileId) return '';
@@ -45,7 +47,9 @@ export function getProxyStreamUrl(fileId, title = '', quality = '') {
   const obfuscatedFid = btoa(cleanId).replace(/=/g, '');
   const token = generateFastTokenSync(cleanId, expiresAt);
 
-  let url = `${WORKER_BASE_HOST}/?id=${encodeURIComponent(cleanId)}&fid=${encodeURIComponent(obfuscatedFid)}&exp=${expiresAt}&token=${token}`;
+  // Dynamic Load Balancer Node Selection with Strict Double-Slash Prevention
+  const baseUrl = (import.meta.env?.VITE_WORKER_PROXY_URL || getOptimalWorkerUrl()).replace(/\/+$/, '');
+  let url = `${baseUrl}/?id=${encodeURIComponent(cleanId)}&fid=${encodeURIComponent(obfuscatedFid)}&exp=${expiresAt}&token=${token}`;
   if (title) url += `&title=${encodeURIComponent(title)}`;
   if (quality) url += `&quality=${encodeURIComponent(quality)}`;
   return url;

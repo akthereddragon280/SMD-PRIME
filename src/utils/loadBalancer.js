@@ -5,9 +5,9 @@
 
 // 1. Array of 3 expected worker URLs (Placeholders)
 export const workers = [
-  'https://smd-stream-node-1.smd-prime.workers.dev',
-  'https://smd-stream-node-2.smd-prime.workers.dev',
-  'https://smd-stream-node-3.smd-prime.workers.dev'
+  "https://smd-stream-node-1.smd-prime.workers.dev",
+  "https://smd-stream-node-2.akthereddragon281.workers.dev",
+  "https://smd-stream-node-3.akthereddragon282.workers.dev"
 ];
 
 /**

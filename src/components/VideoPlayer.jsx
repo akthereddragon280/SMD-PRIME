@@ -15,6 +15,7 @@ import {
   formatDurationString 
 } from '../supabaseClient';
 import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
+import { getOptimalWorkerUrl } from '../utils/loadBalancer';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 import ExternalPlayerMenu from './ExternalPlayerMenu';
 
@@ -83,8 +84,8 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   // Subtitle Tracks State
   const [subtitleTracks, setSubtitleTracks] = useState([
     { id: 'off', label: 'Off', srclang: '', src: '' },
-    { id: 'en', label: 'English ESub', srclang: 'en', src: movie?.subtitles_en || 'https://tgstream.smd-prime.workers.dev/subtitles/en.vtt' },
-    { id: 'ta', label: 'Tamil Subs', srclang: 'ta', src: movie?.subtitles_ta || 'https://tgstream.smd-prime.workers.dev/subtitles/ta.vtt' }
+    { id: 'en', label: 'English ESub', srclang: 'en', src: movie?.subtitles_en || `${getOptimalWorkerUrl().replace(/\/+$/, '')}/subtitles/en.vtt` },
+    { id: 'ta', label: 'Tamil Subs', srclang: 'ta', src: movie?.subtitles_ta || `${getOptimalWorkerUrl().replace(/\/+$/, '')}/subtitles/ta.vtt` }
   ]);
   const [currentSubtitle, setCurrentSubtitle] = useState('off');
 
