@@ -247,8 +247,8 @@ const SA_CACHE_TTL_MS = 60 * 60 * 1000; // 1 Hour (3,600,000 ms)
  * Fetch active Google Drive Service Accounts from Supabase REST DB (`drive_service_accounts`)
  */
 async function fetchServiceAccountsFromDB(env) {
-  const supabaseUrl = env.SUPABASE_URL || 'https://iwulcblngplsjtsipods.supabase.co';
-  const supabaseKey = env.SUPABASE_ANON_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY;
+  const supabaseUrl = env?.SUPABASE_URL || 'https://iwulcblngplsjtsipods.supabase.co';
+  const supabaseKey = env?.SUPABASE_ANON_KEY || env?.SUPABASE_SERVICE_ROLE_KEY || env?.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3dWxjYmxuZ3Bsc2p0c2lwb2RzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzA0MTA2MywiZXhwIjoyMTAyNjE3MDYzfQ.X61a2cj17Zs8Q-0-Pe1ku1PMi_uiybIlYFLv61d8tDU';
 
   if (!supabaseUrl || !supabaseKey) {
     console.warn('[SA DB Fetch] Missing Supabase credentials in worker environment.');
