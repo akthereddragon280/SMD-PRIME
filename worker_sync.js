@@ -258,71 +258,125 @@ function parseRangeHeader(rangeHeader) {
   return { offset };
 }
 
-/**
- * Extract List of Service Accounts from Environment Variables
- */
-function getServiceAccountList(env) {
-  const list = [];
-  const emailsSeen = new Set();
+// Global In-Memory Cache for Service Accounts fetched from Supabase DB
+let cachedSAs = null;
+let cacheTimestamp = 0;
+const SA_CACHE_TTL_MS = 60 * 60 * 1000; // 1 Hour (3,600,000 ms)
 
+/**
+ * Fetch active Google Drive Service Accounts from Supabase REST DB (`drive_service_accounts`)
+ */
+async function fetchServiceAccountsFromDB(env) {
+  const supabaseUrl = env.SUPABASE_URL || 'https://iwulcblngplsjtsipods.supabase.co';
+  const supabaseKey = env.SUPABASE_ANON_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn('[SA DB Fetch] Missing Supabase credentials in worker environment.');
+    return [];
+  }
+
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/drive_service_accounts?is_active=eq.true&select=*`, {
+      method: 'GET',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!res.ok) {
+      console.warn(`[SA DB Fetch Error] HTTP ${res.status}: ${res.statusText}`);
+      return [];
+    }
+
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) {
+      console.warn('[SA DB Fetch] No active service accounts returned from DB.');
+      return [];
+    }
+
+    const list = [];
+    const emailsSeen = new Set();
+
+    rows.forEach(r => {
+      const email = r.email || r.client_email;
+      let key = r.private_key || r.privateKey;
+
+      if (email && key && !emailsSeen.has(email)) {
+        emailsSeen.add(email);
+        list.push({
+          email: email.trim(),
+          privateKey: key.trim()
+        });
+      }
+    });
+
+    return list;
+  } catch (err) {
+    console.error('[SA DB Fetch Exception]:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Get Service Account List with 1-Hour Edge Cache & Graceful Fallback
+ */
+async function getServiceAccountList(env) {
+  const now = Date.now();
+
+  // 1. Return from In-Memory Cache if fresh (< 1 Hour)
+  if (cachedSAs && cachedSAs.length > 0 && (now - cacheTimestamp < SA_CACHE_TTL_MS)) {
+    return cachedSAs;
+  }
+
+  // 2. Fetch fresh SAs from Supabase DB `drive_service_accounts`
+  const freshSAs = await fetchServiceAccountsFromDB(env);
+  if (freshSAs && freshSAs.length > 0) {
+    cachedSAs = freshSAs;
+    cacheTimestamp = now;
+    console.log(`[SA Cache Refresh] Successfully cached ${freshSAs.length} SAs from Supabase DB.`);
+    return cachedSAs;
+  }
+
+  // 3. Fallback to stale cached data if DB is temporarily unreachable
+  if (cachedSAs && cachedSAs.length > 0) {
+    console.warn('[SA Cache Fallback] DB fetch failed. Using stale cached SAs.');
+    return cachedSAs;
+  }
+
+  // 4. Fallback to GOOGLE_SA1..10 environment variables if DB table is empty
+  const fallbackList = [];
+  const emailsSeen = new Set();
   const addSa = (email, privateKey) => {
     if (email && privateKey && !emailsSeen.has(email)) {
       emailsSeen.add(email);
-      list.push({ email, privateKey });
+      fallbackList.push({ email: email.trim(), privateKey: privateKey.trim() });
     }
   };
 
-  // 1. Check SERVICE_ACCOUNTS_JSON array string
-  if (env.SERVICE_ACCOUNTS_JSON) {
-    try {
-      const parsed = JSON.parse(env.SERVICE_ACCOUNTS_JSON);
-      if (Array.isArray(parsed)) {
-        parsed.forEach(sa => {
-          addSa(sa.email || sa.client_email, sa.privateKey || sa.private_key);
-        });
-      }
-    } catch (e) {}
-  }
-
-  // 2. Check GOOGLE_SA1 to GOOGLE_SA10 (Standard Google Credential JSON strings)
   for (let idx = 1; idx <= 10; idx++) {
     const saVar = env[`GOOGLE_SA${idx}`];
     if (saVar) {
       try {
         const parsed = typeof saVar === 'string' ? JSON.parse(saVar) : saVar;
-        if (parsed) {
-          addSa(parsed.client_email || parsed.email, parsed.private_key || parsed.privateKey);
-        }
+        if (parsed) addSa(parsed.client_email || parsed.email, parsed.private_key || parsed.privateKey);
       } catch (e) {}
     }
   }
 
-  // 3. Check GOOGLE_PRIVATE_KEY & GOOGLE_SERVICE_ACCOUNT_EMAIL
   if (env.GOOGLE_PRIVATE_KEY) {
-    addSa(
-      env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 'tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com',
-      env.GOOGLE_PRIVATE_KEY
-    );
+    addSa(env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 'tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com', env.GOOGLE_PRIVATE_KEY);
   }
 
-  // 4. Check GOOGLE_PRIVATE_KEY_2 to 10
-  for (let idx = 2; idx <= 10; idx++) {
-    const key = env[`GOOGLE_PRIVATE_KEY_${idx}`];
-    const email = env[`GOOGLE_SERVICE_ACCOUNT_EMAIL_${idx}`];
-    if (key) {
-      addSa(email || `tgstream-bot-${idx}@tgstream-drive-proxy.iam.gserviceaccount.com`, key);
-    }
+  if (fallbackList.length > 0) {
+    cachedSAs = fallbackList;
+    cacheTimestamp = now;
+    return fallbackList;
   }
 
-  // 5. Default 5 Service Accounts Mesh (Merged cleanly with zero duplicates)
-    // Dynamic SA resolution via env variables
-  const defaultSAs = [];
-
-  return list;
+  return [];
 }
-
-// Global edge counter for true round-robin SA load balancing
-let edgeSaRoundRobinIndex = 0;
 
 // In-Memory Caches & Request Collapsing / Deduplication Maps for Cloudflare Workers Edge Node
 const tokenCache = new Map(); // { email: { token, expiresAt } }
@@ -367,14 +421,14 @@ async function getCachedOrFetchGoogleAccessToken(email, privateKey) {
 
 /**
  * Google Drive Stream Proxy with Cloudflare Cache API (caches.default), Immutable Cache-Control Mesh,
- * Distributed SA Mesh, True Round-Robin Load Balancing, Auto-Heal Quota Bypass,
+ * Distributed SA Mesh, Dynamic DB Rotation, Auto-Heal Quota Bypass,
  * and Async Edge Storage (ctx.waitUntil).
  */
 async function handleGoogleDriveStreamWithMultiSA(request, fileId, isDownload, env, ctx, corsHeaders) {
-  const serviceAccounts = getServiceAccountList(env);
+  const serviceAccounts = await getServiceAccountList(env);
 
-  if (serviceAccounts.length === 0) {
-    return new Response(JSON.stringify({ error: 'No Service Account Credentials Configured' }), {
+  if (!serviceAccounts || serviceAccounts.length === 0) {
+    return new Response(JSON.stringify({ error: 'No Active Service Account Credentials Available' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
@@ -384,8 +438,8 @@ async function handleGoogleDriveStreamWithMultiSA(request, fileId, isDownload, e
   const url = new URL(request.url);
   let lastErrorRes = null;
 
-  // Round-robin starting index to evenly balance initial requests across all SAs in the mesh
-  const startIdx = (edgeSaRoundRobinIndex++) % serviceAccounts.length;
+  // Randomly select starting SA to balance traffic evenly across all 16 DB accounts
+  const startIdx = Math.floor(Math.random() * serviceAccounts.length);
 
   // L1 KV Metadata Cache Check (If `env.KV_CACHE` is bound)
   if (env.KV_CACHE) {
@@ -568,7 +622,7 @@ export async function triggerDriveToSupabaseSync(env) {
   const SUPABASE_URL = env.SUPABASE_URL || 'https://iwulcblngplsjtsipods.supabase.co';
   const SUPABASE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY;
   const FOLDER_ID = env.GOOGLE_DRIVE_FOLDER_ID || '13QLJomTi-5IA4Jjz7TOMSEKwalE6mSCt';
-  const serviceAccounts = getServiceAccountList(env);
+  const serviceAccounts = await getServiceAccountList(env);
   const sa = serviceAccounts[0];
 
   if (!SUPABASE_URL || !SUPABASE_KEY) {
