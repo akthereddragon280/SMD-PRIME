@@ -1,0 +1,7 @@
+name = "smd-stream-node-3"
+main = "worker_sync.js"
+compatibility_date = "2026-08-20"
+
+[vars]
+STREAM_SECRET = "smd_prime_secure_jwt_secret_key_2026"
+GOOGLE_DRIVE_FOLDER_ID = "13QLJomTi-5IA4Jjz7TOMSEKwalE6mSCt"
