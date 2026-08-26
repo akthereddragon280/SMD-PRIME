@@ -6,8 +6,7 @@ import { getOptimalWorkerUrl } from './loadBalancer';
  */
 
 export function getWorkerBaseHost() {
-  const envUrl = import.meta.env?.WORKER_PROXY_URL || import.meta.env?.VITE_WORKER_PROXY_URL;
-  const rawUrl = envUrl || getOptimalWorkerUrl();
+  const rawUrl = getOptimalWorkerUrl();
   return rawUrl.replace(/\?id=.*$/, '').replace(/\/+$/, '');
 }
 
@@ -30,25 +29,50 @@ function generateFastTokenSync(fileId, expiresAt) {
 }
 
 /**
+ * Extract raw Drive File ID from any input string.
+ * Fixes double query parameter bug when inputs contain pre-formatted "/?id=" or full worker URLs.
+ */
+export function extractCleanDriveFileId(rawInput) {
+  if (!rawInput) return '';
+  let str = String(rawInput).trim();
+  
+  if (str.includes('?id=') || str.includes('&id=')) {
+    const match = str.match(/[?&]id=([^&]+)/);
+    if (match && match[1]) {
+      str = decodeURIComponent(match[1]);
+    }
+  } else if (str.includes('/?id=')) {
+    str = str.split('/?id=').pop();
+  }
+
+  // Strip leading slashes, query params, or URL fragments
+  str = str.replace(/^\/+/, '').replace(/^id=/, '').replace(/\?.*$/, '');
+  
+  return str;
+}
+
+/**
  * Returns an obfuscated, HMAC-signed streaming URL routed via the 3-Node Load Balancer.
- * Includes 'id', 'fid', 'exp', and 'token' for updated HMAC security verification.
+ * Fixes double query parameter concatenation (/?id=/?id=) and enforces load-balanced node routing.
  * 
- * @param {string} fileId - The raw Google Drive file ID
- * @returns {string} Dynamic load-balanced & cryptographically signed streaming URL
+ * @param {string} fileId - The raw Google Drive file ID or pre-formatted input
+ * @returns {string} Dynamic load-balanced & cryptographically signed streaming URL with exactly ONE /?id=
  */
 export function getProxyStreamUrl(fileId, title = '', quality = '') {
   if (!fileId) return '';
   
-  // Clean raw file ID
-  const cleanId = String(fileId).trim();
+  // Extract and sanitize clean raw drive file ID
+  const cleanId = extractCleanDriveFileId(fileId);
+  if (!cleanId) return '';
   
   // 4 Hours Expiration Window (14,400 seconds)
   const expiresAt = Math.floor(Date.now() / 1000) + 14400;
   const obfuscatedFid = btoa(cleanId).replace(/=/g, '');
   const token = generateFastTokenSync(cleanId, expiresAt);
 
-  // Dynamic Load Balancer Node Selection with Strict Double-Slash Prevention
-  const baseUrl = (import.meta.env?.VITE_WORKER_PROXY_URL || getOptimalWorkerUrl()).replace(/\/+$/, '');
+  // Dynamic Load Balancer Node Selection (always uses getOptimalWorkerUrl())
+  const baseUrl = getOptimalWorkerUrl().replace(/\/+$/, '');
+
   let url = `${baseUrl}/?id=${encodeURIComponent(cleanId)}&fid=${encodeURIComponent(obfuscatedFid)}&exp=${expiresAt}&token=${token}`;
   if (title) url += `&title=${encodeURIComponent(title)}`;
   if (quality) url += `&quality=${encodeURIComponent(quality)}`;
