@@ -18,7 +18,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN_1 }}
           accountId: ${{ secrets.CF_ACCOUNT_ID_1 }}
-          configFile: 'wrangler-1.toml'
+          command: deploy --config wrangler-1.toml
           vars: |
             SUPABASE_URL
             SUPABASE_ANON_KEY
@@ -31,7 +31,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN_2 }}
           accountId: ${{ secrets.CF_ACCOUNT_ID_2 }}
-          configFile: 'wrangler-2.toml'
+          command: deploy --config wrangler-2.toml
           vars: |
             SUPABASE_URL
             SUPABASE_ANON_KEY
@@ -44,7 +44,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN_3 }}
           accountId: ${{ secrets.CF_ACCOUNT_ID_3 }}
-          configFile: 'wrangler-3.toml'
+          command: deploy --config wrangler-3.toml
           vars: |
             SUPABASE_URL
             SUPABASE_ANON_KEY
