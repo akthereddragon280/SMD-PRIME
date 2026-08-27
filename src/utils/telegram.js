@@ -76,4 +76,22 @@ export function getTelegramUserInfo() {
   }
 }
 
+/**
+ * Safely open external link outside Telegram In-App Browser in default OS browser (Chrome/Safari)
+ * without crashing or breaking TMA session stability.
+ */
+export function openExternalLink(url) {
+  if (!url) return;
+  try {
+    if (typeof window !== 'undefined' && window.Telegram?.WebApp?.openLink) {
+      window.Telegram.WebApp.openLink(url, { try_instant_view: false });
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  } catch (e) {
+    console.warn('openExternalLink note:', e);
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
 export default WebApp;

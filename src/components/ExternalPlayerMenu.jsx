@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Play, Tv, Copy, Check, ShieldCheck } from 'lucide-react';
-import { triggerHaptic } from '../utils/telegram';
+import { triggerHaptic, openExternalLink } from '../utils/telegram';
 
 /**
  * Realistic VLC Traffic Cone SVG Component
@@ -112,14 +112,7 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
     setTimeout(() => {
       // HTTPS Bounce Gateway URL to escape TMA WebView Sandbox
       const gatewayUrl = `${window.location.origin}/player-gate?app=${encodeURIComponent(playerType)}&url=${encodeURIComponent(rawStreamUrl)}`;
-
-      if (window.Telegram?.WebApp?.openLink) {
-        // Use Telegram WebApp API to open HTTPS gateway in external system browser (Chrome/Safari)
-        window.Telegram.WebApp.openLink(gatewayUrl);
-      } else {
-        // Standard browser popup fallback
-        window.open(gatewayUrl, '_blank');
-      }
+      openExternalLink(gatewayUrl);
     }, 300);
   };
 

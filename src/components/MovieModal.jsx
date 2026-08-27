@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Play, Star, Clock, Calendar, Download, ShieldCheck, Film, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase, logDownloadAnalytics } from '../supabaseClient';
+import { supabase, logDownloadAnalytics, formatDurationString } from '../supabaseClient';
 import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 import { getExactMovieDuration } from '../utils/posters';
@@ -12,9 +12,56 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
   const [loadingSources, setLoadingSources] = useState(false);
   const [downloadingQuality, setDownloadingQuality] = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(null);
+  const [dynamicDuration, setDynamicDuration] = useState(movie?.duration_seconds ? formatDurationString(movie.duration_seconds) : null);
 
   // Bind Telegram native BackButton to close modal when active
   useTelegramBackButton(movie ? onClose : null);
+
+  // Query dynamic duration from Supabase 'movie_metadata' table (or user_watch_history)
+  useEffect(() => {
+    async function fetchDynamicMetadata() {
+      if (!movie) return;
+      const targetUid = movie.uid || movie.id;
+      if (!targetUid) return;
+
+      try {
+        // 1. Primary: Query movie_metadata table for updated duration
+        const { data, error } = await supabase
+          .from('movie_metadata')
+          .select('formatted_duration, duration_seconds')
+          .eq('movie_uid', targetUid)
+          .maybeSingle();
+
+        if (!error && data) {
+          if (data.formatted_duration) {
+            setDynamicDuration(data.formatted_duration);
+            return;
+          } else if (data.duration_seconds && data.duration_seconds > 0) {
+            setDynamicDuration(formatDurationString(data.duration_seconds));
+            return;
+          }
+        }
+
+        // 2. Secondary Fallback: Query user_watch_history table for duration_seconds
+        const { data: watchData } = await supabase
+          .from('user_watch_history')
+          .select('duration_seconds')
+          .eq('movie_uid', targetUid)
+          .gt('duration_seconds', 0)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (watchData && watchData.duration_seconds > 0) {
+          setDynamicDuration(formatDurationString(watchData.duration_seconds));
+        }
+      } catch (err) {
+        console.warn('Failed to fetch movie metadata duration:', err);
+      }
+    }
+
+    fetchDynamicMetadata();
+  }, [movie]);
 
   // Dynamic live query from Supabase 'movie_sources' relational table
   useEffect(() => {
@@ -81,7 +128,7 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
     return rankB - rankA;
   });
 
-  const exactDuration = getExactMovieDuration(movie.title, movie.uid, movie.duration);
+  const exactDuration = dynamicDuration || (movie.duration && movie.duration !== '2h 15m' ? movie.duration : null) || getExactMovieDuration(movie.title, movie.uid, movie.duration);
 
   const handlePlayClick = (source) => {
     triggerHaptic('medium');
