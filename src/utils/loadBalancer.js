@@ -11,32 +11,43 @@ export const workers = [
 ];
 
 /**
- * 2. Returns a randomized worker base URL from the available nodes pool.
- * @returns {string} Optimal worker base URL
+ * 2. Strict Failover Architecture: Always returns Primary Node 1.
+ * Stops random node-switching to prevent 403 Google Drive Bot Detection.
+ * @returns {string} Primary worker base URL (Node 1)
  */
 export function getOptimalWorkerUrl() {
-  return workers[Math.floor(Math.random() * workers.length)];
+  return workers[0];
 }
 
 /**
- * 3. Returns the NEXT worker URL in the pool when current node fails (Client-Side Failover).
+ * Alias for Primary Node getter
+ */
+export function getPrimaryWorkerUrl() {
+  return workers[0];
+}
+
+/**
+ * 3. Returns the NEXT sequential fallback worker URL when current node encounters an error (403/500).
+ * Failover Path: Node 1 -> Node 2 -> Node 3 -> Node 1
  * @param {string} currentUrl - Current active worker URL
  * @returns {string} Next fallback worker URL
  */
 export function getNextWorkerUrl(currentUrl = '') {
-  if (!currentUrl) return getOptimalWorkerUrl();
+  if (!currentUrl) return workers[0];
   const currentIndex = workers.findIndex(w => currentUrl.includes(w) || w.includes(currentUrl));
-  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % workers.length : 0;
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % workers.length : 1;
   return workers[nextIndex];
 }
 
 /**
  * Helper to generate stream URL for HTML5 video player integration
+ * Always starts on Primary Node 1 with forced MP4 progressive parameters.
  * @param {string} fileId - Google Drive / Storage file ID
  * @returns {string} Fully routed video stream URL
  */
 export function buildVideoStreamUrl(fileId) {
-  const baseUrl = getOptimalWorkerUrl();
+  const baseUrl = getPrimaryWorkerUrl();
   return `${baseUrl}/?id=${encodeURIComponent(fileId)}&container=mp4&progressive=1`;
 }
+
 

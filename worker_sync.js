@@ -1,16 +1,18 @@
 /**
- * SMD PRIME - CLOUDFLARE MULTI-NODE EDGE STREAMING WORKER (HARDCODED SA MESH)
- * 100% Standalone, Database-Free Infrastructure Engine with Zero External Network Dependencies,
- * In-Memory Service Account Rotation, OAuth Token Caching, Range Pipelining, and Global CORS Enforcement.
+ * SMD PRIME - CLOUDFLARE SINGLE-ENDPOINT HIGH-PERFORMANCE STREAMING WORKER
+ * 
+ * ARCHITECTURE OVERVIEW:
+ * 1. UNIFIED SINGLE ENDPOINT: Replaces multi-node IP-switching with a single edge worker node.
+ * 2. DYNAMIC SA VAULT POOL: Fetches active Google Drive Service Accounts from Supabase DB (`drive_service_accounts`)
+ *    and caches them in-memory for 30 minutes with hardcoded fallback accounts for zero-downtime execution.
+ * 3. DETERMINISTIC ROUND-ROBIN: Rotates through the SA pool sequentially per incoming chunk request.
+ * 4. OAUTH TOKEN CACHING: Caches Google OAuth access tokens in worker memory with expiration buffers (expires_in - 60s).
+ * 5. AUTOMATIC SILENT FAILOVER: Silently retries fetch using next SA in pool if Google Drive returns 403, 429, or 500.
+ * 6. GLOBAL CORS & RANGE PIPELINING: Enforces global CORS compliance and forwards byte-range headers for 206 Partial Content streams.
  */
 
-const STREAM_SECRET = 'smd_prime_secure_jwt_secret_key_2026';
-
-/**
- * 1. HARDCODED MULTI-NODE SERVICE ACCOUNT MESH
- * Embedded Google Service Accounts for guaranteed zero-failure execution across all edge nodes.
- */
-const SERVICE_ACCOUNTS = [
+// 1. HARDCODED FALLBACK SERVICE ACCOUNT VAULT (Ensures zero-downtime if Supabase is unreachable)
+const HARDCODED_SERVICE_ACCOUNTS = [
   {
     email: "tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com",
     privateKey: "-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDH/ZrgLW4U9Bhi\nHCKkwxrjJ/YhruF9kQONhMbZnvpeHFQb3+Tyc/sv1nrl0XkJ/NhittZ7zTGqQHhM\nbmxs76TWGCi/cK9e5bzO1jj+p/GxY2GnnOBQr3VMVGldpoS/9RrE00dN+RRLbrR6\nwNzWk+zjMNINE7bhKDDBjCzZMzOeJYbzjArls4GcgPYBNOmUDx31s1PSagpBAwzc\nzKJNSmJlDraWrbEvYWRHpgZbVXmfy0Dc+6cOs61Y6NpScHDVPe7lNpnr3HXzW/KA\nm8f04Gd5V+VLBV9aYLPx013S/cvb7/qcKMnwU3VBPTAlsK8TrRdx1JrVXFA1E4Bd\nKQq8Yg5PAgMBAAECggEAD+n3TAVxcAtocU4p15CK8C564H1JBjPm43kAVcrXw2tf\nqgQr9LsT7t+TUfxUNF5BXcGM2bcfT5vntrVGvXhoVnz/qRQvcE65sn/Lc0Ar9GCj\nIbJTCzibDeLdq40XnSrE4YqqbuL2IXaCuA3mxNBqlj2JSW8bK1mGX7Bm1TXE0r2n\ntNDu8bOapl4vt2g+Y+ad8ArC5oDOO+NaVGoDtHGvcBQAeEuKebmLLeIj0Aa8luFr\nYPTyZWvcOwdqeM4dYmiLfYSvCXFtys0NXeJ86KLw71RuD+ox2fSiR6EvvRPmk2SL\nPRx923xjRnMP9tclJuKFht1KnjDhGgwVjStK0dSIOQKBgQDoD/oD/WhPR9RyEdfU\n9gN+QZH+TILiXcbTZ+D2fGFVDlg5F+9nhpmBLeB20/frC1JyofWmxy11578YegKW\nwbdYD55jJ/fwBsPidPhBT3R/2HlzMj1VCIVwDtqKkorn9Rsr/byD+XdjLMIrW3/p\nmwnFHsW5G8lmZYPEpgH+f4+LpQKBgQDcnrdMJBtEsQTGB2tTiuZ4pTjNMICShjtH\n8xAW5/aOs0YAAjQc7RAaG9FbY06ahwViXPonPPUgRwNLud3pwlXyYe6VZyPvTq6J\ni1OrA+Bdhvskw7KAa8BzcOo6RuWtfxmZX7/TGMSqtMoILoX9lCTZAZQ7uxI8ewVS\nTv40x3tf4wKBgQCei6PNrAji+Xk8wdIKrlWuoc/DxLQ7QcSAVN1OqaW5/cXqo96t\nhTlFF3ne1WzxCdg3d02ktzno7v8REvLH2uuPX4RfzEPJmmWkRzQBMu6uFdDMEkvy\n15KK/6rxt7LtTPlWcdGk/QBDIqY6BxZ6HLFtGlwN3t0Xd02yQZTlMnN4/QKBgQCx\n2cEqQHE7DvkqKxD6aB8jYw5HW7JKbKuddPSjgpvgreTgXOZl6zXv1j0Pzx6us+pD\nQXDn8NwrCRQ/F7ctmtxuaURMbLkrUeKiPw9T7ewReZ88JAbiP/sFFSG9mSnOk4ev\nfODG7FCezN+ReO/LXIHX7s3w2P36g7HmiIelRKrQwQKBgQCxydU5F191YOg/G3mF\nKg0ETT8SygNgvM/mLLPX6tr4pR85E5ju35uy56xj0MHfnW+Qg2FcwVhPwQNUcCqu\nd6ddgLdaVx1V7kLqQW0soiGdf3J1bM4JH/rFW1gPcmhBUWLGGQDyyk3eOsK+3CzT\nfOPlZNKYGtgFbD+AgdhoQx5MNA==\n-----END PRIVATE KEY-----\n"
@@ -21,20 +23,84 @@ const SERVICE_ACCOUNTS = [
   },
   {
     email: "tgstream-bot-10@tgstream-drive-proxy.iam.gserviceaccount.com",
-    privateKey: "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDTPOFNebPYbkyI\ntsdb9eUl1x+BwbURoSWV//HW6uau8W5HNILnvhTuei5khz/MYncKjxCNAGoxym2r\nyBlAugfoXmEd1X7sZB5S/rcOVgWbH7B00j7aviPxpXwsxfVBnWq89MVBp2PqIQS+\ngmO1YsWYyuITJItIS088l+tEk6shoU3/Rws4EVswQA7XL/MfNySfzPsElxFtHOHR\nCgYfpx956YiZEgy1y8NeBJZqX+QKRY2AglNlaxWNBtCxCSlXYhh6Dz3+ovbz9NVE\nJfJoPrB382TDYUP23bcvBTGwCAV78j2Zd0UbBD1rzqV96eomYJyKO9V3xcspOkDn\nX+Bjp8aTAgMBAAECggEAFUznySizBmmE5SpNKww+GZU6M5rlV8xAnoILEGlqboyg\n2qREaPrlYHDImdF7kPAC4fkwKY+3paKscWyBg2He50MRFvGO1WZ5GlReAB+TfCNz\nZyxGM0eGF1lhDqC9jOrDNx+VfnvTGupOcKl0RXeaxj/7EQQX2WfiqxEEo8siMAdF\nby/2tOJRSUXPFZRMIi8XO7nUo8rL6+8G5e3bVRseIKDbuvMSKEiz7M3892Cd9ECX\nqQPwHFagTpC4lECcLTRmfnCAlhh+qkbuVVncc7W4/FoeN7rfjCpIFAQ77Gi5zjOk\nOzZcNo5VeSoD9ySpCurk5KZpx4oH9/pVNEWBLoRQFQKBgQD6kqergxUDZ6YB4DSc\n9nQtrf+Cr4tNcHNVb57uM6EtuPzu8IDOt/3/Fky9TRngtwjUvO5LgNhWRDt/UKfh\nEARVV8A3x5Shn9z2HsVW0m/OOdznjXC0kc20qhuITx+g9PUpi8QRwS/YiyZtiXsZ\nHZ2XVxeF9GS3AvPWWoOOeBBObQKBgQDX0CAB6KlINRpqHVZEB9Nan96KEcen6ZED\nrQZnPUwl3bUERdnuCrV9QPY0rUJlw3CiT6aorv1KWKgFoBi/inUdEgn0FPaiismd\n3I/RT+EaN03/eRubTiLim15hq0JzQCOMOXN1yi/4Mr5LUVJbNaldHSpgNgvQ61y9\n2ixuledI/wKBgGPqmOt+YKGz8fFriu9QIzGX4XwmLcEaZxMZaGGJuuq1ij5pLqO/\noIvYQ490sC34LpBOKiN3ZEy59pOlANxw+5lgXWigr/bm/UAzMvOVBDpSvnCi6N9I\nCKPS9Rmcm3seUqhXcD64LzEFA7TIDosMUSvo8ZtbwdFsXvkJrM3huHbdAoGAbcFp\nJc9fmFt5bZIx9zNLqAE6OlnEgn7kw0vRv9uKyI8yqlOj+83ycxsAm9WpuPtmYwXD\nKnKkWpUwDnxXWcJewUQVT88Bh7SxyNkNQ1QulRifUFgVVCyuzTRbEaz5hIeQDJaD\nQ9pp/v4/jSp0ifKGidZ1YKzb4YpxhhRZGHygPZ0CgYAJR20OerO+ZSM2rlqMERgm\ngwTKB9qvryuVjIdi7pgF51s0Td2/sWphjWap+0yGf0H2udfcLM+aUYiCYl/22tWz\nOa+braSl7wHBhDaG+NhdXvfc+vN9pz4CtD48FzIK9mPaQPcX94TfDxffkCVlL8NE\n7V/qeOtm+f4whn1F/B8ZQA==\n-----END PRIVATE KEY-----\n"
+    privateKey: "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDTPOFNebPYbkyI\ntsdb9eUl1x+BwbURoSWV//HW6uau8W5HNILnvhTuei5khz/MYncKjxCNAGoxym2r\nyBlAugfoXmEd1X7sZB5S/rcOVgWbH7B00j7aviPxpXwsxfVBnWq89MVBp2PqIQS+\ngmO1YsWYyuITJItIS088l+tEk6shoU3/Rws4EVswQA7XL/MfNySfzPsElxFtHOHR\nCgYfpx956YiZEgy1y8NeBJZqX+QKRY2AglNlaxWNBtCxCSlXYhh6Dz3+ovbz9NVE\nJfJoPrB382TDYUP23bcvBTGwCAV78j2Zd0UbBD1rzqV96eomYJyKO9V3xcspOkDn\nX+Bjp8aTAgMBAAECggEAFUznySizBmmE5SpNKww+GZU6M5rlV8xAnoILEGlqboyg\n2qREaPrlYHDImdF7kPAC4fkwKY+3paKscWyBg2He50MRFvGO1WZ5GlReAB+TfCNz\nZyxGM0eGF1lhDqC9jOrDNx+VfnvTGupOcKl0RXeaxj/7EQQX2WfiqxEEo8siMAdF\nby/2tOJRSUXPFZRMIi8XO7nUo8rL6+8G5e3bVRseIKDbuvMSKEiz7M3892Cd9ECX\nqQPwHFagTpC4lECcLTRmfnCAlhh+qkbuVVncc7W4/FoeN7rfjCpIFAQ77Gi5zjOk\nOzZcNo5VeSoD9ySpCurk5KZpx4oH9/pVNEWBLoRQFQKBgQD6kqergxUDZ6YB4DSc\n9nQtrf+Cr4tNcHNVb57uM6EtuPzu8IDOt/3/Fky9TRngtwjUvO5LgNhWRDt/UKfh\nEARVV8A3x5Shn9z2HsVW0m/OOdznjXB0kc20qhuITx+g9PUpi8QRwS/YiyZtiXsZ\nHZ2XVxeF9GS3AvPWWoOOeBBObQKBgQDX0CAB6KlINRpqHVZEB9Nan96KEcen6ZED\nrQZnPUwl3bUERdnuCrV9QPY0rUJlw3CiT6aorv1KWKgFoBi/inUdEgn0FPaiismd\n3I/RT+EaN03/eRubTiLim15hq0JzQCOMOXN1yi/4Mr5LUVJbNaldHSpgNgvQ61y9\n2ixuledI/wKBgGPqmOt+YKGz8fFriu9QIzGX4XwmLcEaZxMZaGGJuuq1ij5pLqO/\noIvYQ490sC34LpBOKiN3ZEy59pOlANxw+5lgXWigr/bm/UAzMvOVBDpSvnCi6N9I\nCKPS9Rmcm3seUqhXcD64LzEFA7TIDosMUSvo8ZtbwdFsXvkJrM3huHbdAoGAbcFp\nJc9fmFt5bZIx9zNLqAE6OlnEgn7kw0vRv9uKyI8yqlOj+83ycxsAm9WpuPtmYwXD\nKnKkWpUwDnxXWcJewUQVT88Bh7SxyNkNQ1QulRifUFgVVCyuzTRbEaz5hIeQDJaD\nQ9pp/v4/jSp0ifKGidZ1YKzb4YpxhhRZGHygPZ0CgYAJR20OerO+ZSM2rlqMERgm\ngwTKB9qvryuVjIdi7pgF51s0Td2/sWphjWap+0yGf0H2udfcLM+aUYiCYl/22tWz\nOa+braSl7wHBhDaG+NhdXvfc+vN9pz4CtD48FzIK9mPaQPcX94TfDxffkCVlL8NE\n7V/qeOtm+f4whn1F/B8ZQA==\n-----END PRIVATE KEY-----\n"
   }
 ];
 
-// In-Memory Token Cache to reuse OAuth access tokens across chunk requests
-const tokenCache = new Map();
+// 2. IN-MEMORY GLOBAL STATE (Preserved across worker invocations on the same edge instance)
+let cachedServiceAccounts = null;
+let lastSaCacheTime = 0;
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30-Minute Cache TTL for Supabase SA Vault
+let globalRrCounter = 0; // Deterministic Round-Robin counter for chunk distribution
+const tokenCache = new Map(); // Global OAuth Access Token Cache
 
 /**
- * 2. WEB CRYPTO RS256 GOOGLE OAUTH TOKEN GENERATOR
+ * 3. SUPABASE SA VAULT POOL LOADER WITH AUTOMATIC HARDCODED FALLBACK
+ * Fetches active Service Accounts from Supabase REST API (`drive_service_accounts`).
+ * Uses a 30-minute in-memory cache to prevent database load spikes.
+ */
+async function getServiceAccountPool(env) {
+  const now = Date.now();
+  if (cachedServiceAccounts && (now - lastSaCacheTime < CACHE_TTL_MS)) {
+    return cachedServiceAccounts;
+  }
+
+  const supabaseUrl = env?.SUPABASE_URL;
+  const supabaseAnonKey = env?.SUPABASE_ANON_KEY;
+
+  if (supabaseUrl && supabaseAnonKey) {
+    try {
+      const cleanUrl = supabaseUrl.replace(/\/+$/, '');
+      const dbEndpoint = `${cleanUrl}/rest/v1/drive_service_accounts?is_active=eq.true&select=client_email,private_key`;
+
+      const res = await fetch(dbEndpoint, {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+          'Accept': 'application/json'
+        }
+      });
+
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          const mappedPool = rows
+            .map(r => ({
+              email: r.client_email || r.email,
+              privateKey: r.private_key || r.privateKey
+            }))
+            .filter(sa => sa.email && sa.privateKey);
+
+          if (mappedPool.length > 0) {
+            cachedServiceAccounts = mappedPool;
+            lastSaCacheTime = now;
+            console.log(`[SA Vault Pool] Loaded ${mappedPool.length} active Service Accounts from Supabase.`);
+            return cachedServiceAccounts;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[SA Vault Pool Warning] Supabase fetch failed, falling back to hardcoded SA mesh:', err.message);
+    }
+  }
+
+  // Fallback to hardcoded Service Account pool if Supabase is unavailable
+  cachedServiceAccounts = HARDCODED_SERVICE_ACCOUNTS;
+  lastSaCacheTime = now;
+  return HARDCODED_SERVICE_ACCOUNTS;
+}
+
+/**
+ * 4. WEB CRYPTO RS256 GOOGLE OAUTH TOKEN GENERATOR WITH TOKEN CACHING
+ * Caches generated access tokens globally in worker memory until (expires_in - 60s).
  */
 async function getAccessToken(email, privateKey) {
   const now = Math.floor(Date.now() / 1000);
   const cached = tokenCache.get(email);
-  if (cached && cached.expiresAt > now + 300) {
+  
+  // Return cached token if valid for at least 60 seconds
+  if (cached && cached.expiresAt > now + 60) {
     return cached.token;
   }
 
@@ -87,7 +153,8 @@ async function getAccessToken(email, privateKey) {
 
     const data = await res.json();
     if (data.access_token) {
-      tokenCache.set(email, { token: data.access_token, expiresAt: now + 3500 });
+      const ttlSec = data.expires_in || 3600;
+      tokenCache.set(email, { token: data.access_token, expiresAt: now + ttlSec - 60 });
       return data.access_token;
     }
   } catch (err) {
@@ -96,14 +163,17 @@ async function getAccessToken(email, privateKey) {
   return null;
 }
 
+/**
+ * 5. WORKER HANDLER ENTRYPOINT
+ */
 export default {
   async fetch(request, env, ctx) {
-    // 3. STRICT GLOBAL CORS HEADERS
+    // Strict Global CORS Headers
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, OPTIONS, POST, HEAD',
       'Access-Control-Allow-Headers': 'Range, Content-Type, Authorization, X-Requested-With',
-      'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type, X-Cache-Status, X-Sa-Active',
+      'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, Content-Type, X-Cache-Status, X-Sa-Active, X-Sa-Index',
       'X-Content-Type-Options': 'nosniff',
     };
 
@@ -135,7 +205,7 @@ export default {
 
       return new Response(JSON.stringify({ 
         status: 'online', 
-        service: 'SMD PRIME Standalone Multi-Node Stream Gateway v9.0',
+        service: 'SMD PRIME Unified Single-Endpoint Stream Gateway v10.0',
         usage: '/?id=YOUR_GOOGLE_DRIVE_FILE_ID'
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -154,19 +224,31 @@ export default {
 };
 
 /**
- * 4. PURE IN-MEMORY ROTATION & ZERO-BUFFER STREAMING PIPELINE
+ * 6. DETERMINISTIC ROUND-ROBIN & ZERO-BUFFER FAILOVER STREAMING PIPELINE
  */
 async function handleStream(request, fileId, isDownload, env, corsHeaders) {
   const rangeHeader = request.headers.get('Range');
   const url = new URL(request.url);
 
-  // Pick random starting index to distribute load evenly across local Service Accounts
-  const startIdx = Math.floor(Math.random() * SERVICE_ACCOUNTS.length);
-  let lastError = null;
+  // Load active Service Account Vault Pool
+  const saPool = await getServiceAccountPool(env);
+  const poolSize = saPool.length;
 
-  for (let attempt = 0; attempt < SERVICE_ACCOUNTS.length; attempt++) {
-    const idx = (startIdx + attempt) % SERVICE_ACCOUNTS.length;
-    const sa = SERVICE_ACCOUNTS[idx];
+  if (poolSize === 0) {
+    return new Response(JSON.stringify({ error: 'Vault Pool Empty', message: 'No active Service Accounts available.' }), {
+      status: 503,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
+  // Deterministic Round-Robin Start Index
+  const startIndex = (globalRrCounter++) % poolSize;
+  let lastErrorResponse = null;
+
+  // Attempt stream fetch across SA pool with silent failover retries on 403, 429, or 500
+  for (let attempt = 0; attempt < poolSize; attempt++) {
+    const idx = (startIndex + attempt) % poolSize;
+    const sa = saPool[idx];
     const token = await getAccessToken(sa.email, sa.privateKey);
 
     if (!token) continue;
@@ -187,6 +269,7 @@ async function handleStream(request, fileId, isDownload, env, corsHeaders) {
         headers 
       });
 
+      // Successful stream acquisition (HTTP 200 OK or HTTP 206 Partial Content)
       if (driveRes.ok || driveRes.status === 206) {
         const responseHeaders = new Headers(corsHeaders);
 
@@ -229,6 +312,7 @@ async function handleStream(request, fileId, isDownload, env, corsHeaders) {
           status = 200;
         }
 
+        // Return instant zero-buffer stream to the browser
         return new Response(driveRes.body, {
           status,
           statusText: driveRes.statusText,
@@ -236,27 +320,27 @@ async function handleStream(request, fileId, isDownload, env, corsHeaders) {
         });
       }
 
-      // Quota check & automatic failover rotation
-      if (driveRes.status === 403 || driveRes.status === 404 || driveRes.status === 429) {
-        console.warn(`[SA Failover] SA #${idx + 1} (${sa.email}) returned HTTP ${driveRes.status}. Rotating...`);
-        lastError = driveRes;
+      // Quota limit check (403, 429) or Server error (500, 502, 503): Trigger SILENT FAILOVER RETRY
+      if ([403, 404, 429, 500, 502, 503].includes(driveRes.status)) {
+        console.warn(`[Silent SA Failover] SA #${idx + 1} (${sa.email}) returned HTTP ${driveRes.status}. Retrying next SA...`);
+        lastErrorResponse = driveRes;
         continue;
       }
     } catch (fetchErr) {
-      console.warn(`[Drive Fetch Err] SA #${idx + 1}:`, fetchErr.message);
+      console.warn(`[Drive Fetch Err] SA #${idx + 1} (${sa.email}):`, fetchErr.message);
     }
   }
 
-  // All accounts failed or hit quota
+  // Fallback response if all SAs in pool fail
   const errHeaders = new Headers(corsHeaders);
   errHeaders.set('Content-Type', 'application/json');
   
-  if (lastError) {
-    const status = lastError.status >= 400 ? lastError.status : 403;
+  if (lastErrorResponse) {
+    const status = lastErrorResponse.status >= 400 ? lastErrorResponse.status : 403;
     return new Response(JSON.stringify({ 
       error: 'Upstream Stream Error', 
       status, 
-      message: 'Service Account quota exceeded or permission denied on Google Drive.' 
+      message: 'All Service Accounts in vault pool exceeded quota or permission limits.' 
     }), {
       status,
       headers: errHeaders
