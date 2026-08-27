@@ -1,13 +1,25 @@
 /**
  * SMD PRIME — Cloudflare Worker Telegram Bot Webhook Backend
- * Ultra-lightweight, zero-dependency serverless Telegram Bot backend.
- * Handles /start welcome, /help guide, and dynamic Supabase movie lookups.
+ * Production-ready serverless Telegram Bot webhook script.
+ * Handles /start, /help, text fallback, and dynamic Supabase movie lookups with CORS headers.
  */
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With'
+};
 
 export default {
   async fetch(request, env, ctx) {
-    // 1. Handle Webhook Setup Helper Endpoint (GET /setup-webhook?url=https://worker-url)
+    // 0. Handle CORS Preflight Options
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: CORS_HEADERS });
+    }
+
     const url = new URL(request.url);
+
+    // 1. Webhook Registration Endpoint (GET /setup-webhook?url=https://worker-domain)
     if (request.method === 'GET' && url.pathname === '/setup-webhook') {
       const targetWebhook = url.searchParams.get('url') || `${url.origin}/webhook`;
       const botToken = env.TELEGRAM_BOT_TOKEN || '8503429880:AAHu1OPZdV-7vouvusISJvlu-kZ1PXvSttQ';
@@ -15,42 +27,39 @@ export default {
       const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(targetWebhook)}`);
       const data = await tgRes.json();
       return new Response(JSON.stringify(data, null, 2), {
-        headers: { 'Content-Type': 'application/json' }
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
       });
     }
 
-    // 2. Only process POST updates from Telegram
-    if (request.method !== 'POST') {
-      return new Response('SMD PRIME Bot Webhook Active', { status: 200 });
-    }
+    // 2. Webhook POST Listener
+    if (request.method === 'POST') {
+      const botToken = env.TELEGRAM_BOT_TOKEN || '8503429880:AAHu1OPZdV-7vouvusISJvlu-kZ1PXvSttQ';
+      const webAppUrl = env.WEB_APP_URL || 'https://smd-prime.vercel.app';
+      const supabaseUrl = env.SUPABASE_URL || 'https://placeholder.supabase.co';
+      const supabaseKey = env.SUPABASE_ANON_KEY || 'placeholder-key';
 
-    const botToken = env.TELEGRAM_BOT_TOKEN || '8503429880:AAHu1OPZdV-7vouvusISJvlu-kZ1PXvSttQ';
-    const webAppUrl = env.WEB_APP_URL || 'https://smd-prime.vercel.app';
-    const supabaseUrl = env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseKey = env.SUPABASE_ANON_KEY || 'placeholder-key';
+      try {
+        const update = await request.json();
+        
+        if (update.message) {
+          ctx.waitUntil(handleMessage(update.message, botToken, webAppUrl, supabaseUrl, supabaseKey));
+        } else if (update.callback_query) {
+          ctx.waitUntil(handleCallback(update.callback_query, botToken, webAppUrl));
+        }
 
-    try {
-      const update = await request.json();
-      
-      // Handle Message Updates
-      if (update.message) {
-        ctx.waitUntil(handleMessage(update.message, botToken, webAppUrl, supabaseUrl, supabaseKey));
-      } 
-      // Handle Callback Queries (Help buttons, etc.)
-      else if (update.callback_query) {
-        ctx.waitUntil(handleCallback(update.callback_query, botToken, webAppUrl));
+        return new Response('OK', { status: 200, headers: CORS_HEADERS });
+      } catch (err) {
+        console.error('Webhook payload error:', err);
+        return new Response('OK', { status: 200, headers: CORS_HEADERS });
       }
-
-      return new Response('OK', { status: 200 });
-    } catch (err) {
-      console.error('Webhook error:', err);
-      return new Response('OK', { status: 200 });
     }
+
+    return new Response('SMD PRIME Bot Webhook Engine Active', { status: 200, headers: CORS_HEADERS });
   }
 };
 
 /**
- * Main Message Handler
+ * Main Webhook Message Handler
  */
 async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabaseKey) {
   const chatId = message.chat.id;
@@ -59,21 +68,19 @@ async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabase
 
   if (!text) return;
 
-  // Handler: /start
+  // 1. Command Handler for /start
   if (text.startsWith('/start')) {
     const welcomeText = 
-      `<b>👋 Vanakkam, ${escapeHtml(firstName)}! Welcome to SMD PRIME 🍿</b>\n\n` +
-      `<b>Your Ultra-Fast Cloud Cinema Engine</b>\n` +
-      `Stream high-definition movies directly in Telegram with zero buffering, ` +
-      `multiple audio tracks, external player support (VLC / MX Player), and dynamic 4K quality.\n\n` +
-      `<b>🚀 Quick Start Options:</b>\n` +
-      `• Tap <b>'Launch SMD PRIME Mini App'</b> below to start streaming immediately.\n` +
-      `• Or simply <b>type any movie title</b> in this chat (e.g., <i>Master</i>, <i>Jana Nayagan</i>, <i>Jurassic</i>) to search live cinema library!`;
+      `⚡ <b>Welcome to SMD PRIME, ${escapeHtml(firstName)}!</b> 🍿\n\n` +
+      `Your ultra-fast cloud cinema streaming engine is live. ` +
+      `Tap the button below to launch the OTT streaming app, browse the full library, ` +
+      `and stream movies securely in Ultra HD 4K!\n\n` +
+      `<b>💡 Pro Tip:</b> You can also type any movie name in this chat (e.g. <i>Master</i>, <i>Jana Nayagan</i>, <i>Jurassic</i>) to search live movies!`;
 
     const keyboard = {
       inline_keyboard: [
         [
-          { text: '🎬 Launch SMD PRIME Mini App', web_app: { url: webAppUrl } }
+          { text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }
         ],
         [
           { text: '🌐 Open Web App', url: webAppUrl },
@@ -91,13 +98,13 @@ async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabase
     return;
   }
 
-  // Handler: /help
+  // 2. Command Handler for /help
   if (text.startsWith('/help')) {
     await sendHelpCard(chatId, botToken, webAppUrl);
     return;
   }
 
-  // Handler: Movie Text Search
+  // 3. Text Fallback & Dynamic Supabase Movie Search Handler
   if (!text.startsWith('/')) {
     await handleMovieLookup(chatId, text, botToken, webAppUrl, supabaseUrl, supabaseKey);
   }
@@ -110,7 +117,6 @@ async function handleCallback(callbackQuery, botToken, webAppUrl) {
   const chatId = callbackQuery.message?.chat?.id;
   const data = callbackQuery.data;
 
-  // Answer callback query to remove spinner on button
   await sendTelegramApi(botToken, 'answerCallbackQuery', {
     callback_query_id: callbackQuery.id
   });
@@ -125,19 +131,18 @@ async function handleCallback(callbackQuery, botToken, webAppUrl) {
  */
 async function sendHelpCard(chatId, botToken, webAppUrl) {
   const helpText = 
-    `<b>🍿 SMD PRIME — User Guide & Help Center</b>\n\n` +
-    `<b>1. How to Stream Movies:</b>\n` +
-    `Tap the Mini App button to open the full cinema catalog, browse trending movies, ` +
-    `and tap Play. The in-app video decoder supports 1080p, 4K, gesture controls, and subtitles.\n\n` +
-    `<b>2. Movie Chat Lookup:</b>\n` +
-    `Just send any movie name in this chat! The bot will query Supabase and generate interactive movie cards with direct play buttons.\n\n` +
-    `<b>3. External Player Support:</b>\n` +
-    `Inside the video player, tap <b>'EXT'</b> or open playback settings to stream directly in VLC or MX Player for maximum performance.`;
+    `🍿 <b>SMD PRIME — User Guide & Help Center</b>\n\n` +
+    `<b>1. Browse & Stream Movies:</b>\n` +
+    `Tap <b>'🚀 Launch SMD PRIME'</b> below to open the Mini App. You can stream movies in 1080p / 4K with multiple audio languages and subtitles.\n\n` +
+    `<b>2. Instant Chat Search:</b>\n` +
+    `Type any movie name directly in this chat! The bot will query our cloud database and return interactive movie cards with instant play buttons.\n\n` +
+    `<b>3. External Player Handoff:</b>\n` +
+    `Inside the video player, tap <b>'EXT'</b> to stream seamlessly in external players like VLC or MX Player.`;
 
   const keyboard = {
     inline_keyboard: [
       [
-        { text: '🍿 Launch SMD PRIME', web_app: { url: webAppUrl } }
+        { text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }
       ]
     ]
   };
@@ -151,18 +156,16 @@ async function sendHelpCard(chatId, botToken, webAppUrl) {
 }
 
 /**
- * Real-time Supabase Movie Lookup Handler
+ * Text Fallback & Supabase Movie Search Handler
  */
 async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabaseUrl, supabaseKey) {
   if (queryText.length < 2) return;
 
-  // Send typing chat action
   await sendTelegramApi(botToken, 'sendChatAction', {
     chat_id: chatId,
     action: 'typing'
   });
 
-  // Query Supabase REST API
   let movies = [];
   try {
     const searchUrl = `${supabaseUrl.replace(/\/+$/, '')}/rest/v1/movies?select=*,movie_sources(*)&or=(title.ilike.*${encodeURIComponent(queryText)}*,original_title.ilike.*${encodeURIComponent(queryText)}*,overview.ilike.*${encodeURIComponent(queryText)}*)&limit=3`;
@@ -176,19 +179,18 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
       movies = await sbRes.json();
     }
   } catch (err) {
-    console.error('Supabase query error in worker:', err);
+    console.error('Supabase query error:', err);
   }
 
-  // Fallback if no movies found
   if (!movies || movies.length === 0) {
     const emptyText = 
-      `<b>🔍 No movies found matching '${escapeHtml(queryText)}'</b>\n\n` +
-      `Try searching with a shorter title or tap below to browse the complete SMD PRIME Cloud Cinema library!`;
+      `🔍 <b>No movies found matching '${escapeHtml(queryText)}'</b>\n\n` +
+      `Tap below to launch the SMD PRIME Mini App and search our full cloud cinema catalog!`;
 
     const keyboard = {
       inline_keyboard: [
         [
-          { text: '🍿 Open Movie Catalog', web_app: { url: webAppUrl } }
+          { text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }
         ]
       ]
     };
@@ -202,7 +204,6 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
     return;
   }
 
-  // Send movie cards
   for (const movie of movies.slice(0, 3)) {
     const uid = movie.uid || movie.id || 'master_2021';
     const title = sanitizeTitle(movie.title);
@@ -222,10 +223,10 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
     const cardKeyboard = {
       inline_keyboard: [
         [
-          { text: `🎬 Stream ${title.substring(0, 20)} in App`, web_app: { url: movieAppUrl } }
+          { text: `🎬 Stream ${title.substring(0, 20)}`, web_app: { url: movieAppUrl } }
         ],
         [
-          { text: '🍿 Open Full Catalog', web_app: { url: webAppUrl } }
+          { text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }
         ]
       ]
     };
@@ -265,9 +266,6 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
   }
 }
 
-/**
- * Send request to Telegram Bot API
- */
 async function sendTelegramApi(botToken, method, payload) {
   const tgUrl = `https://api.telegram.org/bot${botToken}/${method}`;
   const response = await fetch(tgUrl, {
@@ -278,9 +276,6 @@ async function sendTelegramApi(botToken, method, payload) {
   return response.json();
 }
 
-/**
- * Title Sanitizer
- */
 function sanitizeTitle(rawTitle) {
   if (!rawTitle) return 'Untitled Movie';
   let t = rawTitle.trim();
@@ -289,9 +284,6 @@ function sanitizeTitle(rawTitle) {
   return t || 'Untitled Movie';
 }
 
-/**
- * HTML Escaper helper
- */
 function escapeHtml(str) {
   if (!str) return '';
   return String(str)

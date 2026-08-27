@@ -37,12 +37,11 @@ async def search_supabase_movies(query: str):
     if not clean_query:
         return []
 
-    # Supabase REST API endpoint with case-insensitive ILIKE search & joined sources
     url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/movies"
     params = {
         "select": "*,movie_sources(*)",
         "or": f"(title.ilike.*{clean_query}*,original_title.ilike.*{clean_query}*,overview.ilike.*{clean_query}*)",
-        "limit": "5"
+        "limit": "3"
     }
     headers = {
         "apikey": SUPABASE_ANON_KEY,
@@ -64,7 +63,7 @@ async def search_supabase_movies(query: str):
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    """Rich Netflix-Grade Welcome Card with Web App Launch Buttons."""
+    """1. Command Handler for /start with Web App Launch Button."""
     user = message.from_user
     first_name = user.first_name if user else "Movie Enthusiast"
 
@@ -72,7 +71,7 @@ async def cmd_start(message: types.Message):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🎬 Launch SMD PRIME Mini App",
+                    text="🚀 Launch SMD PRIME",
                     web_app=WebAppInfo(url=WEB_APP_URL)
                 )
             ],
@@ -90,13 +89,11 @@ async def cmd_start(message: types.Message):
     )
 
     welcome_text = (
-        f"<b>👋 Vanakkam, {first_name}! Welcome to SMD PRIME 🍿</b>\n\n"
-        "<b>Your Ultra-Fast Cloud Cinema Engine</b>\n"
-        "Stream high-definition movies directly in Telegram with zero buffering, "
-        "multiple audio tracks, external player support (VLC / MX Player), and dynamic 4K quality.\n\n"
-        "<b>🚀 Quick Start Options:</b>\n"
-        "• Tap <b>'Launch SMD PRIME Mini App'</b> below to start streaming immediately.\n"
-        "• Or simply <b>type any movie title</b> in this chat (e.g., <i>Master</i>, <i>Jana Nayagan</i>, <i>Jurassic</i>) to search live cinema library!"
+        f"⚡ <b>Welcome to SMD PRIME, {first_name}!</b> 🍿\n\n"
+        "Your ultra-fast cloud cinema streaming engine is live. "
+        "Tap the button below to launch the OTT streaming app, browse the full library, "
+        "and stream movies securely in Ultra HD 4K!\n\n"
+        "<b>💡 Pro Tip:</b> You can also type any movie name in this chat (e.g. <i>Master</i>, <i>Jana Nayagan</i>, <i>Jurassic</i>) to search live movies!"
     )
 
     await message.answer(
@@ -108,12 +105,12 @@ async def cmd_start(message: types.Message):
 @dp.message(Command("help"))
 @dp.callback_query(F.data == "help_info")
 async def cmd_help(event: types.Message | types.CallbackQuery):
-    """Help Card with Commands & Guidance."""
+    """2. Command Handler for /help."""
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🍿 Launch SMD PRIME",
+                    text="🚀 Launch SMD PRIME",
                     web_app=WebAppInfo(url=WEB_APP_URL)
                 )
             ]
@@ -121,14 +118,13 @@ async def cmd_help(event: types.Message | types.CallbackQuery):
     )
 
     help_text = (
-        "<b>🍿 SMD PRIME — User Guide & Help Center</b>\n\n"
-        "<b>1. How to Stream Movies:</b>\n"
-        "Tap the Mini App button to open the full cinema catalog, browse trending movies, "
-        "and tap Play. The in-app video decoder supports 1080p, 4K, gesture controls, and subtitles.\n\n"
-        "<b>2. Movie Chat Lookup:</b>\n"
-        "Just send any movie name in this chat! The bot will query Supabase and generate interactive movie cards with direct play buttons.\n\n"
-        "<b>3. External Player Support:</b>\n"
-        "Inside the video player, tap <b>'EXT'</b> or open playback settings to stream directly in VLC or MX Player for maximum performance."
+        "🍿 <b>SMD PRIME — User Guide & Help Center</b>\n\n"
+        "<b>1. Browse & Stream Movies:</b>\n"
+        "Tap <b>'🚀 Launch SMD PRIME'</b> below to open the Mini App. You can stream movies in 1080p / 4K with multiple audio languages and subtitles.\n\n"
+        "<b>2. Instant Chat Search:</b>\n"
+        "Type any movie name directly in this chat! The bot will query our cloud database and return interactive movie cards with instant play buttons.\n\n"
+        "<b>3. External Player Handoff:</b>\n"
+        "Inside the video player, tap <b>'EXT'</b> to stream seamlessly in external players like VLC or MX Player."
     )
 
     if isinstance(event, types.CallbackQuery):
@@ -138,38 +134,34 @@ async def cmd_help(event: types.Message | types.CallbackQuery):
         await event.answer(help_text, reply_markup=keyboard, parse_mode="HTML")
 
 @dp.message(F.text & ~F.text.startswith("/"))
-async def handle_movie_search(message: types.Message):
-    """Real-time Supabase Movie Lookup Handler for Text Queries."""
+async def handle_text_fallback(message: types.Message):
+    """3. Text Fallback & Dynamic Movie Search Handler."""
     query = message.text.strip()
     if len(query) < 2:
         return
 
-    # Indicate typing status while querying database
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-
     movies = await search_supabase_movies(query)
 
     if not movies or len(movies) == 0:
-        # Fallback card when no movies match
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="🍿 Open Movie Catalog",
+                        text="🚀 Launch SMD PRIME",
                         web_app=WebAppInfo(url=WEB_APP_URL)
                     )
                 ]
             ]
         )
         await message.answer(
-            f"<b>🔍 No movies found matching '{query}'</b>\n\n"
-            "Try searching with a shorter title or tap below to browse the complete SMD PRIME Cloud Cinema library!",
+            f"🔍 <b>No movies found matching '{query}'</b>\n\n"
+            "Tap below to launch the SMD PRIME Mini App and search our full cloud cinema catalog!",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
         return
 
-    # Send up to 3 matched movie cards
     for movie in movies[:3]:
         uid = movie.get("uid") or movie.get("id") or "master_2021"
         title = sanitize_title(movie.get("title") or "Untitled Movie")
@@ -184,20 +176,19 @@ async def handle_movie_search(message: types.Message):
         qualities = [s.get("quality") for s in sources if s.get("quality")]
         quality_str = ", ".join(qualities) if qualities else "1080p Ultra HD"
 
-        # Web App launch link with query parameter for targeted movie modal launch
         movie_app_url = f"{WEB_APP_URL.rstrip('/')}?movie={uid}"
 
         card_keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text=f"🎬 Stream {title[:20]} in App",
+                        text=f"🎬 Stream {title[:20]}",
                         web_app=WebAppInfo(url=movie_app_url)
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        text="🍿 Open Full Catalog",
+                        text="🚀 Launch SMD PRIME",
                         web_app=WebAppInfo(url=WEB_APP_URL)
                     )
                 ]
@@ -226,8 +217,7 @@ async def handle_movie_search(message: types.Message):
                     reply_markup=card_keyboard,
                     parse_mode="HTML"
                 )
-        except Exception as e:
-            logging.warn(f"Failed sending photo card for {title}, falling back to text: {e}")
+        except Exception:
             await message.answer(
                 card_text,
                 reply_markup=card_keyboard,
@@ -236,7 +226,7 @@ async def handle_movie_search(message: types.Message):
 
 async def main():
     print("======================================================================")
-    print("  🤖 SMD PRIME NETFLIX-GRADE TELEGRAM BOT IS RUNNING LIVE")
+    print("  🤖 SMD PRIME TELEGRAM BOT IS RUNNING LIVE")
     print(f"  🔗 Connected Web App URL: {WEB_APP_URL}")
     print(f"  ⚡ Supabase Backend URL: {SUPABASE_URL}")
     print("======================================================================")
