@@ -81,7 +81,7 @@ export async function fetchMoviesFromSupabase() {
       supabase.from('movie_metadata').select('*')
     ]);
 
-    const [moviesRes, metaRes] = await promiseWithTimeout(fetchPromise, 4000, 'Supabase fetch timeout (4s)');
+    const [moviesRes, metaRes] = await promiseWithTimeout(fetchPromise, 12000, 'Supabase fetch timeout (12s)');
 
     if (moviesRes.error) {
       console.warn('Supabase movies fetch error:', moviesRes.error.message);

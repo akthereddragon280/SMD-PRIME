@@ -10,7 +10,7 @@ import AdminModal from './components/AdminModal';
 import PlayerGateway from './components/PlayerGateway';
 import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
 import { useNavigationHistory } from './utils/useNavigationHistory';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Film } from 'lucide-react';
 
 export default function App() {
   // Check if current route is the HTTPS Bounce Gateway
