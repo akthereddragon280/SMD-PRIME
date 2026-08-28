@@ -22,6 +22,7 @@ import ExternalPlayerMenu from './ExternalPlayerMenu';
 export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
+  const playStartTimeRef = useRef(null);
 
   const movieUid = propMovieUid || movie?.uid || movie?.id || 'master_2021';
   const movieTitle = movie?.title || 'Movie Stream';
@@ -43,6 +44,35 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+
+  /**
+   * High ROI Loading Validation Engine:
+   * Loading symbol hides ONLY AFTER video duration is fetched AND video plays for 0.5s.
+   * Otherwise, loading symbol remains visible!
+   */
+  const checkAndDismissLoading = (vEl) => {
+    if (!vEl) return;
+    const dur = vEl.duration;
+    const curTime = vEl.currentTime;
+
+    // 1. Duration must be fetched (> 0 and finite)
+    const isDurationFetched = Boolean(dur && isFinite(dur) && dur > 0);
+
+    // 2. Track 0.5s playback duration
+    if (!vEl.paused && curTime > 0 && !playStartTimeRef.current) {
+      playStartTimeRef.current = Date.now();
+    }
+
+    const playElapsed = playStartTimeRef.current ? (Date.now() - playStartTimeRef.current) : 0;
+    const hasPlayedHalfSecond = playElapsed >= 500 || curTime >= 0.5;
+
+    // Dismiss loading spinner ONLY when BOTH duration is fetched AND 0.5s of playback has elapsed
+    if (isDurationFetched && hasPlayedHalfSecond && !vEl.paused) {
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+  };
   
   // Brightness Control State
   const [brightness, setBrightness] = useState(100);
@@ -236,16 +266,11 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     };
   }, [movieUid]);
 
-  // Safety timeout: Automatically clear full-screen loader after 4s to prevent UI locks
+  // Reset play startTime ref when video url or quality changes
   useEffect(() => {
-    let timer;
-    if (loading) {
-      timer = setTimeout(() => {
-        setLoading(false);
-      }, 4000);
-    }
-    return () => clearTimeout(timer);
-  }, [loading, activeVideoUrl]);
+    playStartTimeRef.current = null;
+    setLoading(true);
+  }, [activeVideoUrl]);
 
   // Adaptive Stream Recovery & Instant Multi-Node Failover Engine
   const handleVideoError = (err) => {
@@ -1113,9 +1138,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
             onTimeUpdate={() => {
               if (videoRef.current) {
                 setCurrentTime(videoRef.current.currentTime);
-                if (videoRef.current.currentTime > 0) {
-                  setLoading(false);
-                }
+                checkAndDismissLoading(videoRef.current);
               }
             }}
             onLoadedMetadata={() => {
@@ -1138,28 +1161,45 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                   setCurrentTime(savedProgress);
                   currentTimeRef.current = savedProgress;
                 }
+
+                checkAndDismissLoading(videoRef.current);
               }
             }}
             onCanPlay={() => {
-              setLoading(false);
               setVideoError(false);
+              if (videoRef.current) {
+                checkAndDismissLoading(videoRef.current);
+              }
             }}
             onPlaying={() => {
-              setLoading(false);
               setIsPlaying(true);
+              if (!playStartTimeRef.current) {
+                playStartTimeRef.current = Date.now();
+              }
+              // Validate after 0.5s delay to ensure smooth playback transition
+              setTimeout(() => {
+                if (videoRef.current) {
+                  checkAndDismissLoading(videoRef.current);
+                }
+              }, 500);
             }}
             onWaiting={() => {
-              if (!videoRef.current || videoRef.current.currentTime === 0) {
-                setLoading(true);
-              }
+              playStartTimeRef.current = null;
+              setLoading(true);
             }}
             onStalled={() => {
-              if (!videoRef.current || videoRef.current.currentTime === 0) {
-                setLoading(true);
+              playStartTimeRef.current = null;
+              setLoading(true);
+            }}
+            onSeeking={() => {
+              playStartTimeRef.current = null;
+              setLoading(true);
+            }}
+            onSeeked={() => {
+              if (videoRef.current) {
+                checkAndDismissLoading(videoRef.current);
               }
             }}
-            onSeeking={() => setLoading(true)}
-            onSeeked={() => setLoading(false)}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
             onError={handleVideoError}

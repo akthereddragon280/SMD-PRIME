@@ -38,10 +38,10 @@ export default function Header({
     <>
       <header className={`sticky top-0 z-40 w-full transition-all duration-300 ${
         darkMode 
-          ? 'bg-[#0c0f18]/80 text-white border-zinc-800/80 shadow-lg shadow-black/40' 
-          : 'bg-white/80 text-slate-900 border-slate-200/80 shadow-sm shadow-slate-200/50'
-      } backdrop-blur-2xl border-b px-4 py-3`}>
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
+          ? 'bg-[#090d16]/45 text-white border-white/[0.08] shadow-[0_12px_36px_rgba(0,0,0,0.6)] backdrop-blur-3xl backdrop-saturate-200 backdrop-contrast-125' 
+          : 'bg-white/45 text-slate-900 border-white/40 shadow-xl shadow-slate-900/5 backdrop-blur-3xl backdrop-saturate-200'
+      } border-b px-4 py-3 relative`}>
+        <div className="w-full max-w-full px-2 sm:px-4 flex items-center justify-between gap-2">
           
           {/* Brand Logo */}
           <div 
@@ -51,7 +51,7 @@ export default function Header({
               setActiveCategory('All');
             }}
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-red-600 via-red-500 to-rose-500 flex items-center justify-center text-white shadow-lg shadow-red-500/30 group-hover:scale-105 transition-transform duration-200">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-red-600 via-red-500 to-rose-500 flex items-center justify-center text-white shadow-[0_0_20px_rgba(239,68,68,0.4)] group-hover:scale-105 transition-transform duration-200">
               <Film className="w-5 h-5 stroke-[2.5]" />
             </div>
             <div>
@@ -64,7 +64,7 @@ export default function Header({
                   TMA
                 </span>
               </div>
-              <p className="text-[10px] font-semibold text-slate-500 dark:text-zinc-400 leading-none mt-0.5 flex items-center gap-1">
+              <p className="text-[10px] font-semibold text-slate-400 dark:text-zinc-400 leading-none mt-0.5 flex items-center gap-1">
                 <span>Cloud Cinema</span>
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
               </p>
@@ -78,8 +78,8 @@ export default function Header({
               onClick={handleSearchClick}
               className={`p-2.5 rounded-full transition-all duration-200 ${
                 darkMode 
-                  ? 'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border-zinc-800/80 shadow-md' 
-                  : 'bg-slate-100/90 hover:bg-slate-200/90 text-slate-700 border-slate-200/80 shadow-xs'
+                  ? 'bg-white/[0.07] hover:bg-white/[0.15] text-zinc-100 border-white/10 shadow-lg backdrop-blur-xl' 
+                  : 'bg-white/60 hover:bg-white/80 text-slate-800 border-slate-200/80 shadow-md backdrop-blur-xl'
               } border flex items-center justify-center active:scale-95`}
               aria-label="Search Movies"
             >
@@ -91,8 +91,8 @@ export default function Header({
               onClick={handleThemeToggle}
               className={`p-2.5 rounded-full transition-all duration-200 ${
                 darkMode 
-                  ? 'bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 border-zinc-800/80 shadow-md' 
-                  : 'bg-slate-100/90 hover:bg-slate-200/90 text-amber-500 border-slate-200/80 shadow-xs'
+                  ? 'bg-white/[0.07] hover:bg-white/[0.15] text-amber-400 border-white/10 shadow-lg backdrop-blur-xl' 
+                  : 'bg-white/60 hover:bg-white/80 text-amber-500 border-slate-200/80 shadow-md backdrop-blur-xl'
               } border flex items-center justify-center active:scale-95`}
               title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
             >

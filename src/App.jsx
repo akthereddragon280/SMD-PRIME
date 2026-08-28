@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching } from './supabaseClient';
+import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching, getCachedMovies } from './supabaseClient';
 import Header from './components/Header';
 import HeroBanner from './components/HeroBanner';
 import MovieRow from './components/MovieRow';
@@ -33,8 +33,42 @@ export default function App() {
   const [isLoadingSupabase, setIsLoadingSupabase] = useState(true);
   const [isLiveDatabase, setIsLiveDatabase] = useState(false);
 
-  // Mobile Frame constraint mode for desktop preview
-  const [isMobileFrame, setIsMobileFrame] = useState(true);
+  // Auto-detect Mobile vs Laptop/Desktop layout dynamically
+  const [isMobileDevice, setIsMobileDevice] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
+
+  // Smart Scroll Auto-Hide Category Bar State
+  const [showCategoryBar, setShowCategoryBar] = useState(true);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileDevice(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+
+    let lastScrollY = typeof window !== 'undefined' ? window.scrollY : 0;
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      if (currentScrollY > 60 && currentScrollY > lastScrollY + 6) {
+        // Scrolling Down past 60px -> Hide Category Bar
+        setShowCategoryBar(false);
+      } else if (currentScrollY < lastScrollY - 6 || currentScrollY < 40) {
+        // Scrolling Up or near page top -> Show Category Bar
+        setShowCategoryBar(true);
+      }
+      lastScrollY = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
 
   // Helper to reload Continue Watching row
   const refreshContinueWatching = async (allMovies = moviesList) => {
@@ -66,24 +100,33 @@ export default function App() {
     initTelegramApp();
 
     async function loadDatabaseAndUser() {
-      setIsLoadingSupabase(true);
-      
-      // 1. Capture window.Telegram.WebApp.initDataUnsafe?.user and upsert into Supabase 'users' table
+      // High ROI Optimization 1: Render LocalStorage Cached Movies Instantly in 0ms!
+      const cached = getCachedMovies();
+      if (cached && cached.length > 0) {
+        setMoviesList(cached);
+        setIsLiveDatabase(true);
+        setIsLoadingSupabase(false);
+      } else {
+        setIsLoadingSupabase(true);
+      }
+
+      // High ROI Optimization 2: Non-blocking Background User Profile Upsert
       const tgUser = getTelegramUserInfo();
       if (tgUser) {
         setTelegramUser(tgUser);
-        await upsertTelegramUser(tgUser);
+        upsertTelegramUser(tgUser).catch(e => console.warn('Non-blocking user upsert note:', e));
       }
 
-      // 2. Fetch all movies from Supabase
+      // High ROI Optimization 3: Revalidate catalog with 4s timeout guard
       const data = await fetchMoviesFromSupabase();
       if (data && data.length > 0) {
         setMoviesList(data);
         setIsLiveDatabase(true);
 
-        // 3. Fetch Continue Watching history
-        const continueItems = await fetchContinueWatching(tgUser?.id, data);
-        setContinueWatchingList(continueItems);
+        // Fetch Continue Watching history asynchronously
+        fetchContinueWatching(tgUser?.id, data)
+          .then(items => setContinueWatchingList(items || []))
+          .catch(() => {});
 
         // 4. DEEP-LINKED AUTO-PLAY ROUTER: Auto-launch Video Player or Details Modal if ?movie=UID & ?play=true
         try {
@@ -119,7 +162,7 @@ export default function App() {
         } catch (deepLinkErr) {
           console.warn('[Deep-Link Router] Parameter parsing note:', deepLinkErr);
         }
-      } else {
+      } else if (!cached || cached.length === 0) {
         setMoviesList([]);
         setIsLiveDatabase(false);
       }
@@ -139,9 +182,9 @@ export default function App() {
   const categories = ['All', 'Trending', 'Action', 'Sci-Fi', 'Drama'];
 
   return (
-    <div className={`min-h-screen transition-colors duration-500 relative flex flex-col items-center justify-start ${
+    <div className={`min-h-screen transition-colors duration-500 relative flex flex-col items-stretch justify-start w-full ${
       darkMode 
-        ? 'bg-[#06080d] text-zinc-100' 
+        ? 'bg-[#0c0f18] text-zinc-100' 
         : 'bg-gradient-to-br from-slate-100 via-rose-50/20 via-50% to-indigo-50/30 text-slate-900'
     }`}>
 
@@ -155,82 +198,16 @@ export default function App() {
         }`} />
       </div>
 
-      {/* Desktop/Laptop Frame View Mode Toggle Bar */}
-      <div className="w-full bg-[#0a0d16] text-white text-xs px-4 py-2 flex items-center justify-between shadow-lg relative z-20 hidden sm:flex border-b border-zinc-800/80">
-        <div className="flex items-center gap-3 font-mono">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span className="font-extrabold tracking-wider">Telegram Mini App Simulator</span>
-          
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            <Database className="w-3 h-3" />
-            <span>LIVE MEDIA LIBRARY ({moviesList.length} TITLES)</span>
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-400 text-[11px] font-semibold">View Mode:</span>
-          <button
-            onClick={() => {
-              triggerHaptic('light');
-              setIsMobileFrame(true);
-            }}
-            className={`px-3 py-1 rounded-xl font-extrabold flex items-center gap-1.5 transition-all text-[11px] ${
-              isMobileFrame 
-                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-red-600/30' 
-                : 'bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700'
-            }`}
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>Mobile TMA View</span>
-          </button>
-
-          <button
-            onClick={() => {
-              triggerHaptic('light');
-              setIsMobileFrame(false);
-            }}
-            className={`px-3 py-1 rounded-xl font-extrabold flex items-center gap-1.5 transition-all text-[11px] ${
-              !isMobileFrame 
-                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-red-600/30' 
-                : 'bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700'
-            }`}
-          >
-            <Monitor className="w-3.5 h-3.5" />
-            <span>Expanded View</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Telegram App Container */}
+      {/* Main Application Responsive Container */}
       <div className={`w-full transition-all duration-300 relative z-10 ${
-        isMobileFrame 
-          ? 'max-w-[440px] sm:my-5 sm:rounded-[36px] shadow-2xl overflow-hidden' 
-          : 'max-w-7xl'
+        isMobileDevice 
+          ? 'max-w-md mx-auto min-h-screen relative' 
+          : 'w-full min-h-screen px-4 sm:px-8'
       } ${
         darkMode 
-          ? 'bg-[#0c0f18] text-zinc-100 sm:border border-zinc-800/90 shadow-black/80' 
-          : 'bg-white text-slate-900 sm:border border-slate-200/90 shadow-slate-300/60'
-      } min-h-screen relative pb-20`}>
-
-        {/* Telegram Native Top Header Simulator (Visible on Mobile Frame) */}
-        {isMobileFrame && (
-          <div className="bg-[#090b12] text-white px-4 py-2.5 flex items-center justify-between text-xs font-semibold select-none border-b border-zinc-800/80">
-            <div className="flex items-center gap-2.5">
-              <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-red-600 to-rose-500 flex items-center justify-center font-black text-[10px] shadow-md shadow-red-600/30">
-                S
-              </div>
-              <div>
-                <div className="font-extrabold text-white leading-none tracking-tight">SMD PRIME Bot</div>
-                <div className="text-[9px] text-zinc-400 leading-none mt-0.5 font-mono">bot mini app</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 text-zinc-400">
-              <MoreVertical className="w-4 h-4 cursor-pointer hover:text-white transition-colors" />
-              <X className="w-4 h-4 cursor-pointer hover:text-white transition-colors" />
-            </div>
-          </div>
-        )}
+          ? 'bg-[#0c0f18] text-zinc-100' 
+          : 'bg-white text-slate-900'
+      } relative pb-20`}>
 
         {/* Sticky App Header */}
         <Header
@@ -242,8 +219,16 @@ export default function App() {
           setActiveCategory={setActiveCategory}
         />
 
-        {/* Category Tab Pills */}
-        <div className="px-4 py-3">
+        {/* Category Tab Pills (Smart Scroll Auto-Hide Frosted Glass Bar) */}
+        <div className={`sticky top-[61px] z-30 px-4 transition-all duration-300 ease-in-out transform origin-top ${
+          showCategoryBar
+            ? 'translate-y-0 opacity-100 max-h-16 py-2 pointer-events-auto border-b'
+            : '-translate-y-full opacity-0 max-h-0 py-0 overflow-hidden pointer-events-none border-b-0'
+        } ${
+          darkMode 
+            ? 'bg-[#0c0f18]/45 backdrop-blur-3xl backdrop-saturate-200 border-white/[0.05]' 
+            : 'bg-white/45 backdrop-blur-3xl backdrop-saturate-200 border-slate-200/50'
+        }`}>
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-touch py-1">
             {categories.map((cat) => (
               <button

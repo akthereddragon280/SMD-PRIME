@@ -28,42 +28,81 @@ export function sanitizeTitle(rawTitle) {
   return t || 'Untitled Movie';
 }
 
+const CACHE_KEY_MOVIES = 'smd_cached_movies';
+
+/**
+ * Retrieve cached movie catalog from LocalStorage for 0ms instant app boot
+ */
+export function getCachedMovies() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY_MOVIES);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+/**
+ * Save movie catalog to LocalStorage for offline/stale-while-revalidate acceleration
+ */
+export function setCachedMovies(movies) {
+  try {
+    if (Array.isArray(movies) && movies.length > 0) {
+      localStorage.setItem(CACHE_KEY_MOVIES, JSON.stringify(movies));
+    }
+  } catch (e) {}
+}
+
+/**
+ * Helper to wrap any promise with a strict execution timeout guard
+ */
+
+export function promiseWithTimeout(promise, ms = 4000, timeoutMsg = 'Operation timed out') {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(timeoutMsg)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+}
+
 /**
  * Fetch all movies with joined quality sources and movie metadata from Supabase
- * Enriches metadata with high-definition posters, authentic ratings, and dynamic durations.
+ * High ROI Optimization: Parallel Query Execution + 4-Second Timeout Guard + Stale-While-Revalidate Caching.
  */
 export async function fetchMoviesFromSupabase() {
   try {
-    const { data, error } = await supabase
-      .from('movies')
-      .select('*, movie_sources(*)');
+    // Execute movies query and movie_metadata query IN PARALLEL with a strict 4-second timeout
+    const fetchPromise = Promise.all([
+      supabase.from('movies').select('*, movie_sources(*)'),
+      supabase.from('movie_metadata').select('*')
+    ]);
 
-    if (error) {
-      console.warn('Supabase fetch note:', error.message);
-      return null;
+    const [moviesRes, metaRes] = await promiseWithTimeout(fetchPromise, 4000, 'Supabase fetch timeout (4s)');
+
+    if (moviesRes.error) {
+      console.warn('Supabase movies fetch error:', moviesRes.error.message);
+      return getCachedMovies();
     }
 
+    const data = moviesRes.data;
     if (!data || data.length === 0) {
-      return null;
+      return getCachedMovies();
     }
 
-    // Fetch dynamic movie_metadata (durations) gracefully
+    // Build metadata map from parallel query
     let metadataMap = {};
-    try {
-      const { data: metaData } = await supabase.from('movie_metadata').select('*');
-      if (metaData && metaData.length > 0) {
-        metaData.forEach(m => {
-          if (m.movie_uid) {
-            metadataMap[m.movie_uid] = m;
-          }
-        });
-      }
-    } catch (e) {
-      console.warn('movie_metadata fetch note:', e.message);
+    if (metaRes && metaRes.data && metaRes.data.length > 0) {
+      metaRes.data.forEach(m => {
+        if (m.movie_uid) metadataMap[m.movie_uid] = m;
+      });
     }
 
     // Format Supabase data into UI shape with authentic posters and ratings
-    return data.map((item) => {
+    const formatted = data.map((item) => {
       const uid = item.uid || item.id;
       const title = sanitizeTitle(item.title);
 
@@ -120,9 +159,14 @@ export async function fetchMoviesFromSupabase() {
         sources: sources.length > 0 ? sources : []
       };
     });
+
+    // Save fresh dataset to LocalStorage cache
+    setCachedMovies(formatted);
+    return formatted;
+
   } catch (err) {
-    console.error('Unexpected Supabase connection error:', err);
-    return null;
+    console.warn('Supabase fetch note (falling back to cache/local):', err.message);
+    return getCachedMovies();
   }
 }
 
