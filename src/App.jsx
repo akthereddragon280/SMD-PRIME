@@ -51,16 +51,26 @@ export default function App() {
     window.addEventListener('resize', handleResize);
 
     let lastScrollY = typeof window !== 'undefined' ? window.scrollY : 0;
+    let ticking = false;
+
     const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      if (currentScrollY > 60 && currentScrollY > lastScrollY + 6) {
-        // Scrolling Down past 60px -> Hide Category Bar
-        setShowCategoryBar(false);
-      } else if (currentScrollY < lastScrollY - 6 || currentScrollY < 40) {
-        // Scrolling Up or near page top -> Show Category Bar
-        setShowCategoryBar(true);
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const currentScrollY = window.scrollY;
+          const diff = currentScrollY - lastScrollY;
+
+          if (currentScrollY > 100 && diff > 10) {
+            // Scrolling Down past 100px with 10px hysteresis -> Hide
+            setShowCategoryBar(false);
+          } else if (diff < -10 || currentScrollY < 40) {
+            // Scrolling Up by at least 10px or near page top -> Show
+            setShowCategoryBar(true);
+          }
+          lastScrollY = currentScrollY;
+          ticking = false;
+        });
+        ticking = true;
       }
-      lastScrollY = currentScrollY;
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -219,35 +229,37 @@ export default function App() {
           setActiveCategory={setActiveCategory}
         />
 
-        {/* Category Tab Pills (Smart Scroll Auto-Hide Frosted Glass Bar) */}
-        <div className={`sticky top-[61px] z-30 px-4 transition-all duration-300 ease-in-out transform origin-top ${
-          showCategoryBar
-            ? 'translate-y-0 opacity-100 max-h-16 py-2 pointer-events-auto border-b'
-            : '-translate-y-full opacity-0 max-h-0 py-0 overflow-hidden pointer-events-none border-b-0'
-        } ${
-          darkMode 
-            ? 'bg-[#0c0f18]/45 backdrop-blur-3xl backdrop-saturate-200 border-white/[0.05]' 
-            : 'bg-white/45 backdrop-blur-3xl backdrop-saturate-200 border-slate-200/50'
-        }`}>
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-touch py-1">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => {
-                  triggerHaptic('light');
-                  setActiveCategory(cat);
-                }}
-                className={`px-4 py-2 rounded-2xl text-xs font-extrabold transition-all whitespace-nowrap active:scale-95 ${
-                  activeCategory === cat
-                    ? 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white shadow-lg shadow-red-600/35 border border-red-400/40 transform scale-[1.02]'
-                    : darkMode
-                      ? 'bg-zinc-900/80 text-zinc-300 border border-zinc-800/90 hover:bg-zinc-800/80 backdrop-blur-md'
-                      : 'bg-white/90 text-slate-700 border border-slate-200/90 shadow-xs hover:bg-slate-100/90 backdrop-blur-md'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
+        {/* Category Tab Pills (Zero-Glitch Dissolve Bar) */}
+        <div className="sticky top-[61px] z-30 pointer-events-none overflow-hidden">
+          <div className={`w-full px-4 py-2 transition-all duration-200 ease-out transform origin-top ${
+            showCategoryBar
+              ? 'opacity-100 scale-100 pointer-events-auto border-b'
+              : 'opacity-0 scale-95 pointer-events-none border-b-0'
+          } ${
+            darkMode 
+              ? 'bg-[#0c0f18]/85 backdrop-blur-3xl backdrop-saturate-200 border-white/[0.08] shadow-lg shadow-black/40' 
+              : 'bg-white/85 backdrop-blur-3xl backdrop-saturate-200 border-slate-200/80 shadow-md'
+          }`}>
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-touch py-0.5">
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => {
+                    triggerHaptic('light');
+                    setActiveCategory(cat);
+                  }}
+                  className={`px-4 py-2 rounded-2xl text-xs font-extrabold transition-all whitespace-nowrap active:scale-95 ${
+                    activeCategory === cat
+                      ? 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white shadow-lg shadow-red-600/35 border border-red-400/40 transform scale-[1.02]'
+                      : darkMode
+                        ? 'bg-zinc-900/90 text-zinc-300 border border-zinc-800/90 hover:bg-zinc-800/80 backdrop-blur-md'
+                        : 'bg-white/90 text-slate-700 border border-slate-200/90 shadow-xs hover:bg-slate-100/90 backdrop-blur-md'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
