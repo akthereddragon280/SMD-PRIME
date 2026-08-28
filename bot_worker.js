@@ -173,7 +173,8 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
 
   let movies = [];
   try {
-    const searchUrl = `${supabaseUrl}/rest/v1/movies?select=*,movie_sources(*)&or=(title.ilike.*${encodeURIComponent(queryText)}*,original_title.ilike.*${encodeURIComponent(queryText)}*,overview.ilike.*${encodeURIComponent(queryText)}*)&limit=3`;
+    // Query Supabase for strictly 1 top matching movie result
+    const searchUrl = `${supabaseUrl}/rest/v1/movies?select=*,movie_sources(*)&or=(title.ilike.*${encodeURIComponent(queryText)}*,original_title.ilike.*${encodeURIComponent(queryText)}*,overview.ilike.*${encodeURIComponent(queryText)}*)&limit=1`;
     const sbRes = await fetch(searchUrl, {
       headers: {
         'apikey': supabaseKey,
@@ -212,60 +213,53 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
     return;
   }
 
-  // Send movie cards (strictly web_app inline buttons)
-  for (const movie of movies.slice(0, 3)) {
-    const uid = movie.uid || movie.id || 'master_2021';
-    const title = sanitizeTitle(movie.title);
-    const origTitle = sanitizeTitle(movie.original_title || title);
-    const year = movie.release_year || '2026';
-    const rating = movie.rating !== null && movie.rating !== undefined ? String(movie.rating) : '7.5';
-    const duration = movie.duration || '2h 15m';
-    const overview = movie.overview || 'High quality cinema stream loaded live from SMD Prime Cloud Cinema Library.';
-    const poster = movie.poster_url;
+  // Render ONLY the single best matching movie card
+  const movie = movies[0];
+  const uid = movie.uid || movie.id || 'master_2021';
+  const title = sanitizeTitle(movie.title);
+  const origTitle = sanitizeTitle(movie.original_title || title);
+  const year = movie.release_year || '2026';
+  const rating = movie.rating !== null && movie.rating !== undefined ? String(movie.rating) : '8.5';
+  const duration = movie.duration || '2h 15m';
+  const overview = movie.overview || 'High quality cinema stream loaded live from SMD Prime Cloud Cinema Library.';
+  const poster = movie.poster_url;
+  const genre = movie.genre || 'Action / Cinema';
 
-    const sources = movie.movie_sources || [];
-    const qualities = sources.map(s => s.quality).filter(Boolean);
-    const qualityStr = qualities.length > 0 ? qualities.join(', ') : '1080p Ultra HD';
+  const sources = movie.movie_sources || [];
+  const qualities = sources.map(s => s.quality).filter(Boolean);
+  const qualityStr = qualities.length > 0 ? qualities.join(', ') : '1080p Ultra HD';
 
-    // Deep link directly inside Telegram Mini App popup
-    const movieAppUrl = `${webAppUrl}?movie=${uid}`;
+  // Deep-linked URL parameter for Auto-Play directly inside Telegram Mini App
+  const movieAppUrl = `${webAppUrl}?movie=${encodeURIComponent(uid)}&play=true`;
 
-    const cardKeyboard = {
-      inline_keyboard: [
-        [
-          { text: `🎬 Stream ${title.substring(0, 20)}`, web_app: { url: movieAppUrl } }
-        ],
-        [
-          { text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }
-        ]
+  const cardKeyboard = {
+    inline_keyboard: [
+      [
+        { text: `▶️ Stream ${title.substring(0, 22)} Now`, web_app: { url: movieAppUrl } }
+      ],
+      [
+        { text: '🍿 Open SMD PRIME Catalog', web_app: { url: webAppUrl } }
       ]
-    };
+    ]
+  };
 
-    const cardText = 
-      `<b>🎬 ${escapeHtml(title)} (${year})</b>\n` +
-      `<i>${escapeHtml(origTitle)}</i>\n\n` +
-      `⭐ <b>Rating:</b> ${rating} / 10 | 🎭 <b>Genre:</b> Action\n` +
-      `⏱️ <b>Duration:</b> ${duration} | 💿 <b>Quality:</b> ${qualityStr}\n\n` +
-      `📖 <b>Overview:</b> ${escapeHtml(overview.substring(0, 180))}...`;
+  const cardText = 
+    `🎬 <b>${escapeHtml(title)} (${year})</b>\n` +
+    `<i>${escapeHtml(origTitle)}</i>\n\n` +
+    `⭐ <b>Rating:</b> ${rating} / 10 | 🎭 <b>Genre:</b> ${escapeHtml(genre)}\n` +
+    `⏱️ <b>Duration:</b> ${duration} | 💿 <b>Quality:</b> ${qualityStr}\n\n` +
+    `📖 <b>Overview:</b> ${escapeHtml(overview.substring(0, 200))}...`;
 
-    try {
-      if (poster && poster.startsWith('http')) {
-        await sendTelegramApi(botToken, 'sendPhoto', {
-          chat_id: chatId,
-          photo: poster,
-          caption: cardText,
-          parse_mode: 'HTML',
-          reply_markup: cardKeyboard
-        });
-      } else {
-        await sendTelegramApi(botToken, 'sendMessage', {
-          chat_id: chatId,
-          text: cardText,
-          parse_mode: 'HTML',
-          reply_markup: cardKeyboard
-        });
-      }
-    } catch (e) {
+  try {
+    if (poster && poster.startsWith('http')) {
+      await sendTelegramApi(botToken, 'sendPhoto', {
+        chat_id: chatId,
+        photo: poster,
+        caption: cardText,
+        parse_mode: 'HTML',
+        reply_markup: cardKeyboard
+      });
+    } else {
       await sendTelegramApi(botToken, 'sendMessage', {
         chat_id: chatId,
         text: cardText,
@@ -273,6 +267,13 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
         reply_markup: cardKeyboard
       });
     }
+  } catch (e) {
+    await sendTelegramApi(botToken, 'sendMessage', {
+      chat_id: chatId,
+      text: cardText,
+      parse_mode: 'HTML',
+      reply_markup: cardKeyboard
+    });
   }
 }
 

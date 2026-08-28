@@ -9,6 +9,7 @@ import SearchOverlay from './components/SearchOverlay';
 import AdminModal from './components/AdminModal';
 import PlayerGateway from './components/PlayerGateway';
 import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
+import { useNavigationHistory } from './utils/useNavigationHistory';
 import { Flame, Zap, Compass, Clapperboard, Smartphone, Monitor, MoreVertical, X, Loader2, Database, Film, History } from 'lucide-react';
 
 export default function App() {
@@ -42,6 +43,24 @@ export default function App() {
     setContinueWatchingList(items);
   };
 
+  // Synchronize browser history stack and Telegram WebApp native BackButton
+  const {
+    closeMovieDetail,
+    closePlayer,
+    closeSearch,
+    closeAdmin
+  } = useNavigationHistory({
+    selectedMovie,
+    setSelectedMovie,
+    activePlayingMovie,
+    setActivePlayingMovie,
+    isSearchOpen,
+    setIsSearchOpen,
+    isAdminOpen,
+    setIsAdminOpen,
+    refreshContinueWatching
+  });
+
   // Initialize Telegram WebApp, sync user profile, & fetch Supabase data on mount
   useEffect(() => {
     initTelegramApp();
@@ -65,6 +84,41 @@ export default function App() {
         // 3. Fetch Continue Watching history
         const continueItems = await fetchContinueWatching(tgUser?.id, data);
         setContinueWatchingList(continueItems);
+
+        // 4. DEEP-LINKED AUTO-PLAY ROUTER: Auto-launch Video Player or Details Modal if ?movie=UID & ?play=true
+        try {
+          const searchParams = new URLSearchParams(window.location.search);
+          const tgStartParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param || '';
+
+          const targetMovieUid = searchParams.get('movie') || 
+                                searchParams.get('movie_id') || 
+                                searchParams.get('uid') || 
+                                tgStartParam.replace(/^movie_/, '');
+          
+          const autoPlayRequested = searchParams.get('play') === 'true' || 
+                                    searchParams.get('play') === '1' || 
+                                    searchParams.has('autoplay');
+
+          if (targetMovieUid) {
+            const foundMovie = data.find(m => 
+              String(m.uid || '').toLowerCase() === targetMovieUid.toLowerCase() ||
+              String(m.id || '').toLowerCase() === targetMovieUid.toLowerCase() ||
+              String(m.title || '').toLowerCase().includes(targetMovieUid.toLowerCase())
+            );
+
+            if (foundMovie) {
+              if (autoPlayRequested) {
+                console.log('[Deep-Link Auto-Play] Auto-launching Video Player for:', foundMovie.title);
+                setActivePlayingMovie(foundMovie);
+              } else {
+                console.log('[Deep-Link Router] Auto-opening Movie Details for:', foundMovie.title);
+                setSelectedMovie(foundMovie);
+              }
+            }
+          }
+        } catch (deepLinkErr) {
+          console.warn('[Deep-Link Router] Parameter parsing note:', deepLinkErr);
+        }
       } else {
         setMoviesList([]);
         setIsLiveDatabase(false);
@@ -374,7 +428,7 @@ export default function App() {
       {selectedMovie && (
         <MovieModal
           movie={selectedMovie}
-          onClose={() => setSelectedMovie(null)}
+          onClose={closeMovieDetail}
           onPlay={(m) => {
             setSelectedMovie(null);
             setActivePlayingMovie(m);
@@ -387,10 +441,7 @@ export default function App() {
       {activePlayingMovie && (
         <VideoPlayer
           movie={activePlayingMovie}
-          onClose={() => {
-            setActivePlayingMovie(null);
-            refreshContinueWatching();
-          }}
+          onClose={closePlayer}
         />
       )}
 
@@ -398,7 +449,7 @@ export default function App() {
       {isSearchOpen && (
         <SearchOverlay
           movies={moviesList}
-          onClose={() => setIsSearchOpen(false)}
+          onClose={closeSearch}
           onSelectMovie={(m) => setSelectedMovie(m)}
           onPlay={(m) => setActivePlayingMovie(m)}
           darkMode={darkMode}
@@ -408,7 +459,7 @@ export default function App() {
       {/* Admin Command Center Modal */}
       {isAdminOpen && (
         <AdminModal
-          onClose={() => setIsAdminOpen(false)}
+          onClose={closeAdmin}
           darkMode={darkMode}
           totalMoviesCount={moviesList.length}
         />

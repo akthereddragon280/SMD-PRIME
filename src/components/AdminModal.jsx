@@ -42,6 +42,28 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
   const [topDownloadedMovies, setTopDownloadedMovies] = useState([]);
   const [downloadLogs, setDownloadLogs] = useState([]);
 
+  // Live Diagnostic Recheck & SA Count State
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagReport, setDiagReport] = useState(null);
+  const [activeSaCount, setActiveSaCount] = useState(16);
+
+  const runInfrastructureCheck = async () => {
+    setDiagLoading(true);
+    try {
+      const res = await fetch('https://smd-stream-node-1.smd-prime.workers.dev/admin/diagnostics?token=smd_prime_admin_secret_2026');
+      if (res.ok) {
+        const data = await res.json();
+        setDiagReport(data);
+      } else {
+        setDiagReport({ error: `HTTP ${res.status} Unauthorized or Worker Offline` });
+      }
+    } catch (e) {
+      setDiagReport({ error: e.message });
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
   // User Management State & Slide-out Context Drawer
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState(null); // User object for Contextual Slide-out Drawer
@@ -204,6 +226,15 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
 
         if (usersData) setRegisteredUsers(usersData);
         if (count !== null) setUserCount(count);
+
+        const { count: saActiveCount } = await supabase
+          .from('drive_service_accounts')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_active', true);
+
+        if (saActiveCount !== null && saActiveCount !== undefined) {
+          setActiveSaCount(saActiveCount);
+        }
 
         fetchFilteredAnalytics('all', 'all');
       } catch (err) {
@@ -477,7 +508,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                     <span className="text-xs font-bold text-zinc-400">Worker Mesh</span>
                     <Server className="w-4 h-4 text-cyan-400" />
                   </div>
-                  <div className="text-3xl font-black font-heading text-white">20 SAs</div>
+                  <div className="text-3xl font-black font-heading text-white">{activeSaCount} SAs</div>
                   <div className="text-[10px] text-cyan-400 font-bold mt-1.5 flex items-center gap-1 font-mono">
                     <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
                     <span>Lazy Failover Active</span>
@@ -503,9 +534,15 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                       Live Pulse Telemetry & Worker Health
                     </h4>
                   </div>
-                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20 font-bold">
-                    ONLINE 200 OK
-                  </span>
+                  
+                  <button
+                    onClick={runInfrastructureCheck}
+                    disabled={diagLoading}
+                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-red-600/30 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    <RotateCcw className={`w-3.5 h-3.5 ${diagLoading ? 'animate-spin' : ''}`} />
+                    <span>{diagLoading ? 'Testing Nodes...' : '⚡ Recheck Infrastructure'}</span>
+                  </button>
                 </div>
 
                 <div className="space-y-3 text-xs font-mono">
@@ -517,14 +554,44 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                     <span>Cloudflare Edge Proxy</span>
                     <span className="text-cyan-400 font-bold flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                      <span>Single-Endpoint Lazy Health Gateway (v11.0)</span>
+                      <span>Single-Endpoint Lazy Health Gateway (v13.0)</span>
                     </span>
                   </div>
                   <div className="flex items-center justify-between py-1 text-zinc-400">
                     <span>Service Account Pool</span>
-                    <span className="text-emerald-400 font-bold">20 Accounts Active (15m Cooldown Protection)</span>
+                    <span className="text-emerald-400 font-bold">{activeSaCount} Vault Accounts Active (15m Cooldown Protection)</span>
                   </div>
                 </div>
+
+                {/* Live Diagnostic Output Card */}
+                {diagReport && (
+                  <div className="p-4 rounded-xl bg-zinc-950 border border-white/10 space-y-2 font-mono text-[11px] animate-fadeIn">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                      <span className="text-amber-400 font-bold uppercase">Backend Diagnostic Result</span>
+                      <span className="text-zinc-500">{diagReport.timestamp ? new Date(diagReport.timestamp).toLocaleTimeString() : 'Now'}</span>
+                    </div>
+
+                    {diagReport.error ? (
+                      <div className="text-red-400 font-bold">✖ Test Error: {diagReport.error}</div>
+                    ) : (
+                      <>
+                        <div className="text-emerald-400 font-bold">✔ HMAC Signature Engine: {diagReport.hmacEngine?.status}</div>
+                        <div className="text-zinc-300 font-bold pt-1">Node Connectivity & Latencies:</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                          {diagReport.nodes?.map(n => (
+                            <div key={n.id} className={`p-2 rounded-lg border ${n.online ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                              <div className="font-bold uppercase text-[10px]">{n.id}</div>
+                              <div>Status: {n.status} ({n.latencyMs}ms)</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="text-cyan-400 pt-1">
+                          SA Mesh Health: {diagReport.serviceAccountMesh?.activeHealthy} / {diagReport.serviceAccountMesh?.totalAccounts} Healthy ({diagReport.serviceAccountMesh?.coolingDown} Cooling Down)
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
