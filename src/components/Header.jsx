@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Film, Moon, Sun, User, Sparkles, CheckCircle2, ShieldCheck, X, ShieldAlert } from 'lucide-react';
+import { Search, Film, Moon, Sun, CheckCircle2, ShieldCheck, X, ShieldAlert } from 'lucide-react';
 import { triggerHaptic, getTelegramUserInfo } from '../utils/telegram';
 import { isAdminUser } from '../utils/admin';
 

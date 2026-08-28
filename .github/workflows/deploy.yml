@@ -1,47 +1,97 @@
-name: Deploy Multi-Worker Load Balancer Architecture
+name: SMD PRIME - Production CI/CD Pipeline
 
 on:
   push:
     branches:
       - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  deploy:
-    name: Deploy Stream Nodes to Cloudflare Workers
+  # 1. Build Verification & Quality Audits
+  verify-and-build:
+    name: 🧪 Verify Frontend & Build Pipeline
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: 📥 Checkout Codebase
         uses: actions/checkout@v4
 
-      - name: Deploy Stream Node 1
-        uses: cloudflare/wrangler-action@v3
+      - name: ⚙️ Setup Modern Node.js Runtime (Node 22 LTS)
+        uses: actions/setup-node@v4
         with:
-          apiToken: ${{ secrets.CF_API_TOKEN_1 }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID_1 }}
-          command: deploy --config wrangler-1.toml
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SERVICE_ACCOUNTS_JSON: ${{ secrets.SERVICE_ACCOUNTS_JSON }}
+          node-version: 22
+          cache: 'npm'
 
-      - name: Deploy Stream Node 2
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN_2 }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID_2 }}
-          command: deploy --config wrangler-2.toml
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SERVICE_ACCOUNTS_JSON: ${{ secrets.SERVICE_ACCOUNTS_JSON }}
+      - name: 📦 Install Dependencies
+        run: npm ci
 
-      - name: Deploy Stream Node 3
+      - name: 🛠️ Execute Production Vite Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_WORKER_PROXY_URL: ${{ secrets.VITE_WORKER_PROXY_URL }}
+
+  # 2. Deploy Telegram Bot Cloudflare Worker
+  deploy-bot-worker:
+    name: 🤖 Deploy Telegram Bot Worker
+    runs-on: ubuntu-latest
+    needs: verify-and-build
+    steps:
+      - name: 📥 Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Modern Node.js Runtime (Node 22 LTS)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: 🚀 Deploy Telegram Bot Worker to Cloudflare Edge
         uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: ${{ secrets.CF_API_TOKEN_3 }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID_3 }}
-          command: deploy --config wrangler-3.toml
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config wrangler-bot.toml
         env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          WEB_APP_URL: ${{ secrets.WEB_APP_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SERVICE_ACCOUNTS_JSON: ${{ secrets.SERVICE_ACCOUNTS_JSON }}
+
+  # 3. Deploy Streaming Proxy Mesh Worker Nodes
+  deploy-stream-workers:
+    name: ⚡ Deploy Stream Node (${{ matrix.config }})
+    runs-on: ubuntu-latest
+    needs: verify-and-build
+    strategy:
+      matrix:
+        config: ['wrangler.jsonc', 'wrangler-1.toml', 'wrangler-2.toml', 'wrangler-3.toml']
+    steps:
+      - name: 📥 Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Modern Node.js Runtime (Node 22 LTS)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: 🚀 Deploy Cloudflare Worker Node (${{ matrix.config }})
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config ${{ matrix.config }}
+        env:
+          STREAM_SECRET: ${{ secrets.STREAM_SECRET }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}

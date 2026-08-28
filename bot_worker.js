@@ -6,9 +6,8 @@
 
 // Production Fallbacks for Supabase Cloud Database & Web App Frontend
 const DEFAULT_SUPABASE_URL = 'https://iwulcblngplsjtsipods.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3dWxjYmxuZ3Bsc2p0c2lwb2RzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzA0MTA2MywiZXhwIjoyMTAyNjE3MDYzfQ.X61a2cj17Zs8Q-0-Pe1ku1PMi_uiybIlYFLv61d8tDU';
 const DEFAULT_WEB_APP_URL = 'https://smd-prime.vercel.app';
-const DEFAULT_BOT_TOKEN = '8503429880:AAHu1OPZdV-7vouvusISJvlu-kZ1PXvSttQ';
+
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -28,8 +27,15 @@ export default {
     // 1. One-Click Webhook Registration Helper Endpoint (GET /setup-webhook?url=YOUR_WORKER_URL)
     if (request.method === 'GET' && url.pathname === '/setup-webhook') {
       const targetWebhook = url.searchParams.get('url') || `${url.origin}/webhook`;
-      const botToken = env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN;
+      const botToken = env.TELEGRAM_BOT_TOKEN || '';
       
+      if (!botToken) {
+        return new Response(JSON.stringify({ error: 'TELEGRAM_BOT_TOKEN is not configured' }), {
+          status: 400,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+        });
+      }
+
       const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(targetWebhook)}`);
       const data = await tgRes.json();
       return new Response(JSON.stringify(data, null, 2), {
@@ -39,10 +45,10 @@ export default {
 
     // 2. Incoming Telegram POST Update Listener
     if (request.method === 'POST') {
-      const botToken = env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN;
+      const botToken = env.TELEGRAM_BOT_TOKEN || '';
       const webAppUrl = (env.WEB_APP_URL || DEFAULT_WEB_APP_URL).replace(/\/+$/, '');
       const supabaseUrl = (env.SUPABASE_URL || DEFAULT_SUPABASE_URL).replace(/\/+$/, '');
-      const supabaseKey = env.SUPABASE_ANON_KEY || env.SUPABASE_KEY || DEFAULT_SUPABASE_ANON_KEY;
+      const supabaseKey = env.SUPABASE_ANON_KEY || env.SUPABASE_KEY || '';
 
       try {
         const update = await request.json();
