@@ -112,7 +112,7 @@ export default function MovieCard({ movie, onSelectMovie, onPlay, darkMode }) {
             <button
               onClick={handlePlayDirect}
               className="w-11 h-11 rounded-full bg-gradient-to-tr from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 text-white flex items-center justify-center shadow-xl shadow-amber-600/50 transform scale-90 group-hover:scale-100 transition-transform duration-200"
-              title="Download Only Mode"
+              title="Download Now"
             >
               <Download className="w-5 h-5" />
             </button>

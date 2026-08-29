@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { REAL_MOVIE_METADATA, getCinematicPoster, getCinematicBackdrop } from './utils/posters';
 
-export const SUPABASE_URL = import.meta.env?.SUPABASE_URL || import.meta.env?.VITE_SUPABASE_URL || '';
-export const SUPABASE_ANON_KEY = import.meta.env?.SUPABASE_ANON_KEY || import.meta.env?.VITE_SUPABASE_ANON_KEY || '';
+export const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || import.meta.env?.SUPABASE_URL || '';
+export const SUPABASE_ANON_KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || import.meta.env?.SUPABASE_ANON_KEY || '';
 
 // Safe fallback placeholder URL if configuration is missing to avoid crashing top-level module load
 const validSupabaseUrl = SUPABASE_URL && SUPABASE_URL.startsWith('http') 
@@ -28,6 +28,31 @@ export function sanitizeTitle(rawTitle) {
   return t || 'Untitled Movie';
 }
 
+
+
+/**
+ * Smart Poster Priority Sorting Helper:
+ * Sorts movies prioritizing authentic real image posters (HTTP/HTTPS) ahead of Dynamic SVG Posters.
+ * Preserves the existing relative ordering among movies of the same poster type.
+ */
+export function sortMoviesWithPosterPriority(moviesList = []) {
+  if (!Array.isArray(moviesList) || moviesList.length <= 1) return moviesList;
+
+  const isSvgPoster = (m) => {
+    const url = m.thumbnail_url || m.poster_url || '';
+    return typeof url === 'string' && (url.startsWith('data:image') || url.includes('data:image/svg+xml'));
+  };
+
+  return [...moviesList].sort((a, b) => {
+    const aIsSvg = isSvgPoster(a);
+    const bIsSvg = isSvgPoster(b);
+
+    if (!aIsSvg && bIsSvg) return -1; // Authentic poster comes before SVG poster
+    if (aIsSvg && !bIsSvg) return 1;  // SVG poster comes after authentic poster
+    return 0; // Maintain existing relative order
+  });
+}
+
 const CACHE_KEY_MOVIES = 'smd_cached_movies';
 
 /**
@@ -39,7 +64,7 @@ export function getCachedMovies() {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return sortMoviesWithPosterPriority(parsed);
       }
     }
   } catch (e) {}
@@ -160,9 +185,11 @@ export async function fetchMoviesFromSupabase() {
       };
     });
 
+    const sortedFormatted = sortMoviesWithPosterPriority(formatted);
+
     // Save fresh dataset to LocalStorage cache
-    setCachedMovies(formatted);
-    return formatted;
+    setCachedMovies(sortedFormatted);
+    return sortedFormatted;
 
   } catch (err) {
     console.warn('Supabase fetch note (falling back to cache/local):', err.message);
@@ -175,11 +202,11 @@ export async function fetchMoviesFromSupabase() {
  */
 export function filterMoviesByMultiParam(moviesList, queryText) {
   if (!moviesList || moviesList.length === 0) return [];
-  if (!queryText || queryText.trim().length === 0) return moviesList;
+  if (!queryText || queryText.trim().length === 0) return sortMoviesWithPosterPriority(moviesList);
 
   const tokens = queryText.trim().toLowerCase().split(/\s+/).filter(Boolean);
 
-  return moviesList.filter(movie => {
+  const filtered = moviesList.filter(movie => {
     const titleLower = (movie.title || '').toLowerCase();
     const origLower = (movie.original_title || '').toLowerCase();
     const descLower = (movie.description || '').toLowerCase();
@@ -218,6 +245,8 @@ export function filterMoviesByMultiParam(moviesList, queryText) {
       );
     });
   });
+
+  return sortMoviesWithPosterPriority(filtered);
 }
 
 /**

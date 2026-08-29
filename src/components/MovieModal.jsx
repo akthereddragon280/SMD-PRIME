@@ -235,20 +235,8 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
     })));
   };
 
-  // Language Flag Helper
-  const getLanguageFlag = (lang) => {
-    switch (lang.toLowerCase()) {
-      case 'tamil': return '🇮🇳';
-      case 'telugu': return '🇮🇳';
-      case 'hindi': return '🇮🇳';
-      case 'malayalam': return '🇮🇳';
-      case 'kannada': return '🇮🇳';
-      case 'english': return '🇺🇸';
-      case 'multi audio': return '🌐';
-      case 'dual audio': return '🎙️';
-      default: return '🔊';
-    }
-  };
+  // Language Flag Helper (Flags disabled per user request)
+  const getLanguageFlag = () => '';
 
   // Helper to detect multi-part broken archive files (.part001, Part 1, Part 2)
   const isMultiPartFile = (src) => {
@@ -506,14 +494,14 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                   <>
                     <Download className="w-5 h-5 ml-0.5" />
                     <span>
-                      Download Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {getLanguageFlag(selectedAudioFilter)} {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
+                      Download Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
                     </span>
                   </>
                 ) : (
                   <>
                     <Play className="w-5 h-5 fill-white ml-0.5" />
                     <span>
-                      Play Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {getLanguageFlag(selectedAudioFilter)} {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
+                      Play Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
                     </span>
                   </>
                 )}
@@ -648,7 +636,6 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                                   : 'bg-cyan-50 text-cyan-700 border-cyan-200'
                               }`}
                             >
-                              <span>{getLanguageFlag(lang)}</span>
                               <span>{lang}</span>
                             </span>
                           ))}
@@ -667,7 +654,7 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                           className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-extrabold rounded-xl transition shadow-md shadow-amber-600/30 flex items-center gap-1.5 active:scale-95"
                         >
                           <Download className="w-3.5 h-3.5" />
-                          <span>Download Only</span>
+                          <span>Download Now</span>
                         </button>
                       ) : !isExceedingLimit ? (
                         <button
@@ -682,7 +669,7 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                           onClick={() => handleDownloadClick(src)}
                           className="px-3 py-1.5 text-[11px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition"
                         >
-                          Download Only
+                          Download Now
                         </button>
                       )}
                       

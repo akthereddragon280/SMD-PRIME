@@ -512,46 +512,141 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     }
   };
 
+/**
+ * Helper to sort video sources:
+ * 1. Group by language: Tamil first priority, followed by Telugu, Hindi, Malayalam, Kannada, English, then others.
+ * 2. Within each language group, sort by quality resolution in descending order (4K > 1080p > 720p > 480p).
+ * 3. Tie-breaker: File size in descending order.
+ */
+function getSortedVideoSources(sourcesList = []) {
+  if (!Array.isArray(sourcesList) || sourcesList.length === 0) return [];
+
+  const getLanguagePriority = (src) => {
+    const text = `${src.language || ''} ${src.audio_language || ''} ${src.quality || ''} ${src.file_name || ''} ${src.title || ''} ${Array.isArray(src.audio_languages) ? src.audio_languages.join(' ') : ''}`.toLowerCase();
+    
+    if (text.includes('tamil') || text.includes('tam')) return 100;
+    if (text.includes('telugu') || text.includes('tel')) return 90;
+    if (text.includes('hindi') || text.includes('hin')) return 80;
+    if (text.includes('malayalam') || text.includes('mal')) return 70;
+    if (text.includes('kannada') || text.includes('kan')) return 60;
+    if (text.includes('english') || text.includes('eng')) return 50;
+    return 10;
+  };
+
+  const getQualityRank = (src) => {
+    const text = (src.quality || src.file_name || '').toUpperCase();
+    if (text.includes('4K') || text.includes('2160P')) return 4000;
+    if (text.includes('1080P')) return 3000;
+    if (text.includes('720P')) return 2000;
+    if (text.includes('480P')) return 1000;
+    if (text.includes('360P')) return 500;
+    return 1500;
+  };
+
+  const getSizeBytes = (src) => {
+    if (typeof src.size_gb === 'number') return src.size_gb * 1024 * 1024 * 1024;
+    const str = String(src.file_size || '').toUpperCase().trim();
+    if (!str) return 0;
+    const val = parseFloat(str.replace(/[^0-9.]/g, '')) || 0;
+    if (str.includes('GB')) return val * 1024 * 1024 * 1024;
+    if (str.includes('MB')) return val * 1024 * 1024;
+    return val;
+  };
+
+  return [...sourcesList].sort((a, b) => {
+    const langPriorityA = getLanguagePriority(a);
+    const langPriorityB = getLanguagePriority(b);
+    if (langPriorityA !== langPriorityB) {
+      return langPriorityB - langPriorityA;
+    }
+
+    const qRankA = getQualityRank(a);
+    const qRankB = getQualityRank(b);
+    if (qRankA !== qRankB) {
+      return qRankB - qRankA;
+    }
+
+    const sizeA = getSizeBytes(a);
+    const sizeB = getSizeBytes(b);
+    return sizeB - sizeA;
+  });
+}
+
   // 9b. Fullscreen Engine: Native requestFullscreen + Telegram Mini App CSS Fake Landscape Hack
   const toggleFullscreen = async () => {
     triggerHaptic('medium');
 
     const isInsideTelegram = Boolean(window.Telegram?.WebApp?.initData && window.Telegram.WebApp.initData.length > 0);
 
+    // If currently in any fullscreen mode (fake or real), exit fullscreen cleanly
+    if (isFakeFullscreen || isFullscreen || document.fullscreenElement) {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        try {
+          await document.exitFullscreen();
+        } catch (e) {}
+      }
+      if (window.Telegram?.WebApp?.exitFullscreen) {
+        try {
+          window.Telegram.WebApp.exitFullscreen();
+        } catch (e) {}
+      }
+      if (window.Telegram?.WebApp?.unlockOrientation) {
+        try {
+          window.Telegram.WebApp.unlockOrientation();
+        } catch (e) {}
+      }
+      if (window.screen?.orientation?.unlock) {
+        try {
+          window.screen.orientation.unlock();
+        } catch (e) {}
+      }
+      setIsFakeFullscreen(false);
+      setIsFullscreen(false);
+      return;
+    }
+
+    // Try Telegram native fullscreen API first
+    if (window.Telegram?.WebApp?.requestFullscreen) {
+      try {
+        window.Telegram.WebApp.requestFullscreen();
+        setIsFullscreen(true);
+        return;
+      } catch (e) {}
+    }
+
     if (window.Telegram?.WebApp?.expand) {
       window.Telegram.WebApp.expand();
     }
 
-    if (!isFakeFullscreen && !isFullscreen && !document.fullscreenElement) {
-      try {
-        if (containerRef.current?.requestFullscreen) {
-          await containerRef.current.requestFullscreen();
-        } else if (videoRef.current?.webkitEnterFullscreen) {
-          videoRef.current.webkitEnterFullscreen();
-        }
-        
-        if (window.screen?.orientation?.lock) {
-          await window.screen.orientation.lock('landscape').catch(() => {});
-        }
+    try {
+      if (containerRef.current?.requestFullscreen) {
+        await containerRef.current.requestFullscreen();
         setIsFullscreen(true);
-      } catch (err) {
-        // Fallback: ONLY inside Telegram Mini App activate 90-degree CSS Fake Landscape
-        if (isInsideTelegram) {
-          setIsFakeFullscreen(true);
-          setIsFullscreen(true);
-        } else {
-          setIsFullscreen(true);
+      } else if (videoRef.current?.webkitEnterFullscreen) {
+        videoRef.current.webkitEnterFullscreen();
+        setIsFullscreen(true);
+      } else if (isInsideTelegram) {
+        setIsFakeFullscreen(true);
+        setIsFullscreen(true);
+        if (window.Telegram?.WebApp?.lockOrientation) {
+          try { window.Telegram.WebApp.lockOrientation(); } catch (e) {}
         }
       }
-    } else {
-      if (document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
+      
+      if (window.screen?.orientation?.lock) {
+        await window.screen.orientation.lock('landscape').catch(() => {});
       }
-      if (window.screen?.orientation?.unlock) {
-        window.screen.orientation.unlock().catch(() => {});
+    } catch (err) {
+      if (isInsideTelegram) {
+        setIsFakeFullscreen(true);
+        setIsFullscreen(true);
+        if (window.Telegram?.WebApp?.lockOrientation) {
+          try { window.Telegram.WebApp.lockOrientation(); } catch (e) {}
+        }
+      } else {
+        setIsFakeFullscreen(true);
+        setIsFullscreen(true);
       }
-      setIsFakeFullscreen(false);
-      setIsFullscreen(false);
     }
   };
 
@@ -1091,7 +1186,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                       {/* Quality Submenu */}
                       {settingsTab === 'quality' && (
                         <div className="flex flex-col gap-1 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-                          {sources.map((s, idx) => (
+                          {getSortedVideoSources(sources).map((s, idx) => (
                             <button
                               key={idx}
                               onClick={() => {
@@ -1108,7 +1203,6 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                                 <span>{s.quality || '1080p'}</span>
                                 {currentQuality === s.quality && <Check className="w-3.5 h-3.5" />}
                               </div>
-                              <span className="text-[10px] font-mono opacity-80">{s.file_size || 'HD'}</span>
                             </button>
                           ))}
                         </div>

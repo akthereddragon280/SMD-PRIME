@@ -121,7 +121,7 @@ export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode, str
             {streamingMode === 'download_only' ? (
               <>
                 <Download className="w-4 h-4" />
-                <span>Download Only</span>
+                <span>Download Now</span>
               </>
             ) : (
               <>

@@ -386,7 +386,7 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                           onSelectMovie(m);
                         }}
                         className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white flex items-center justify-center shadow-lg shadow-amber-600/40 shrink-0 transform group-hover:scale-110 transition-transform active:scale-95"
-                        title="Download Only Mode"
+                        title="Download Now"
                       >
                         <Download className="w-5 h-5" />
                       </button>

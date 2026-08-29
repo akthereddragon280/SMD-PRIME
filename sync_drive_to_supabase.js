@@ -511,8 +511,87 @@ async function syncDriveToSupabase() {
     }
   }
 
+/**
+ * Smart Min/Max File Size Filter:
+ * For each movie + language + quality resolution (e.g. Tamil 720p),
+ * if there are > 2 files of different sizes, pick ONLY 2 files:
+ * 1. Minimum file size (smallest)
+ * 2. Maximum file size (largest)
+ */
+function filterMinMaxSourcesPerQualityGroup(sourcesList = []) {
+  if (!Array.isArray(sourcesList) || sourcesList.length <= 2) return sourcesList;
+
+  const groups = {};
+
+  for (const src of sourcesList) {
+    const langsKey = Array.isArray(src.audio_languages) && src.audio_languages.length > 0 
+      ? src.audio_languages.join('_') 
+      : 'Tamil';
+    
+    let baseRes = '1080p';
+    const qStr = (src.quality || '').toUpperCase();
+    if (qStr.includes('4K') || qStr.includes('2160P')) baseRes = '4K';
+    else if (qStr.includes('1080P')) baseRes = '1080p';
+    else if (qStr.includes('720P')) baseRes = '720p';
+    else if (qStr.includes('480P')) baseRes = '480p';
+
+    const groupKey = `${langsKey}_${baseRes}`;
+
+    if (!groups[groupKey]) {
+      groups[groupKey] = [];
+    }
+    groups[groupKey].push(src);
+  }
+
+  const finalFilteredSources = [];
+
+  for (const groupKey in groups) {
+    const groupItems = groups[groupKey];
+    if (groupItems.length <= 2) {
+      finalFilteredSources.push(...groupItems);
+    } else {
+      // Sort ascending by rawSizeBytes
+      groupItems.sort((a, b) => (Number(a.rawSizeBytes) || 0) - (Number(b.rawSizeBytes) || 0));
+      
+      const minFile = groupItems[0];
+      const maxFile = groupItems[groupItems.length - 1];
+
+      finalFilteredSources.push(minFile);
+      if (maxFile.drive_file_id !== minFile.drive_file_id) {
+        finalFilteredSources.push(maxFile);
+      }
+    }
+  }
+
+  // Guarantee 100% unique quality strings per movie to satisfy Supabase 'movie_sources_uid_quality_key' constraint
+  const seenQualityMap = new Map();
+  const uniqueQualitySources = [];
+
+  for (const src of finalFilteredSources) {
+    let finalQ = src.quality || '1080p';
+    if (seenQualityMap.has(finalQ)) {
+      const count = seenQualityMap.get(finalQ) + 1;
+      seenQualityMap.set(finalQ, count);
+      finalQ = `${finalQ} #${count}`;
+    } else {
+      seenQualityMap.set(finalQ, 1);
+    }
+    uniqueQualitySources.push({
+      ...src,
+      quality: finalQ
+    });
+  }
+
+  return uniqueQualitySources;
+}
+
   const uniqueMovieKeys = Object.keys(moviesGrouped);
   console.log(`\nGrouped ${driveFiles.length} raw file(s) into ${uniqueMovieKeys.length} clean movie record(s).\n`);
+
+  // Apply Min/Max File Size Filter per Movie & Quality Group
+  for (const uid of uniqueMovieKeys) {
+    moviesGrouped[uid].sources = filterMinMaxSourcesPerQualityGroup(moviesGrouped[uid].sources);
+  }
 
   // ⚡ 2026 Modern High-ROI Smart Diff Pre-Fetch
   console.log('⚡ Pre-fetching existing sync state from Supabase for zero-latency diff comparison...');
@@ -526,25 +605,13 @@ async function syncDriveToSupabase() {
   console.log(`Found ${existingFileIdSet.size} already synced source record(s) & ${existingMovieUidSet.size} existing movie record(s) in Supabase.`);
 
   const summary = [];
-  let skippedCount = 0;
   let pushedCount = 0;
+  let moviePushedCount = 0;
 
   for (const uid of uniqueMovieKeys) {
     const movieGroup = moviesGrouped[uid];
 
-    // Check if all file sources for this movie already exist in Supabase
-    const unsyncedSources = movieGroup.sources.filter(src => 
-      !existingFileIdSet.has(src.drive_file_id) && !existingMovieQualitySet.has(`${uid}_${src.quality}`)
-    );
-    const isMovieInDb = existingMovieUidSet.has(uid);
-
-    if (unsyncedSources.length === 0 && isMovieInDb) {
-      // 🚀 TIME SAVER: O(1) Instant Skip for already synced movies!
-      skippedCount += movieGroup.sources.length;
-      continue;
-    }
-
-    console.log(`\n✨ [NEW MEDIA DETECTED] Syncing: "${movieGroup.cleanTitle}" (${movieGroup.year || '2026'})`);
+    console.log(`\n✨ [SYNCING MEDIA] "${movieGroup.cleanTitle}" (${movieGroup.year || '2026'}) — ${movieGroup.sources.length} source(s)`);
     const meta = await fetchMetadata(movieGroup.cleanTitle, movieGroup.year);
 
     // Upsert into Supabase 'movies' table
@@ -563,36 +630,92 @@ async function syncDriveToSupabase() {
     if (mErr) {
       console.error(`✖ Movie Push Failed [${meta.title}]:`, mErr.message);
     } else {
-      console.log(`✨ Movie Record Pushed: "${meta.title}" (${meta.release_year}) -> Poster: ${meta.poster_url.substring(0, 45)}...`);
+      moviePushedCount++;
+      console.log(`✨ Movie Record Synced: "${meta.title}" (${meta.release_year}) -> Poster: ${meta.poster_url.substring(0, 45)}...`);
     }
 
-      let saCounter = 1;
-      for (const src of movieGroup.sources) {
-        if (existingFileIdSet.has(src.drive_file_id)) continue;
-        const saIndex = (saCounter % 20) + 1;
-        saCounter++;
+    // Keep track of valid drive_file_ids for this movie
+    const validFileIdsForMovie = new Set(movieGroup.sources.map(s => s.drive_file_id));
 
-        let { error: sErr } = await supabase.from('movie_sources').upsert({
-          movie_uid: uid,
-          quality: src.quality,
-          drive_file_id: src.drive_file_id,
-          file_size: src.file_size,
-          audio_languages: src.audio_languages || ['Tamil'],
-          sa_account_index: saIndex
-        }, { onConflict: 'drive_file_id' });
+    let saCounter = 1;
+    for (const src of movieGroup.sources) {
+      const saIndex = (saCounter % 20) + 1;
+      saCounter++;
 
-      if (sErr) {
-        const { error: insErr } = await supabase.from('movie_sources').insert({
-          movie_uid: uid,
-          quality: src.quality,
-          drive_file_id: src.drive_file_id,
-          file_size: src.file_size,
-          audio_languages: src.audio_languages || ['Tamil'],
-          sa_account_index: 1
-        });
-        sErr = insErr;
+      // Check if source already exists in DB by drive_file_id OR by (movie_uid, quality)
+      let existingSourceRec = null;
+      const { data: byDriveId } = await supabase
+        .from('movie_sources')
+        .select('id')
+        .eq('drive_file_id', src.drive_file_id)
+        .maybeSingle();
+
+      if (byDriveId) {
+        existingSourceRec = byDriveId;
+      } else {
+        const { data: byUidQuality } = await supabase
+          .from('movie_sources')
+          .select('id')
+          .eq('movie_uid', uid)
+          .eq('quality', src.quality)
+          .maybeSingle();
+        if (byUidQuality) existingSourceRec = byUidQuality;
       }
-      pushedCount++;
+
+      let sErr = null;
+      if (existingSourceRec) {
+        const { error: uErr } = await supabase
+          .from('movie_sources')
+          .update({
+            movie_uid: uid,
+            quality: src.quality,
+            drive_file_id: src.drive_file_id,
+            file_size: src.file_size,
+            audio_languages: src.audio_languages || ['Tamil'],
+            sa_account_index: saIndex
+          })
+          .eq('id', existingSourceRec.id);
+        sErr = uErr;
+      } else {
+        const { error: iErr } = await supabase
+          .from('movie_sources')
+          .insert({
+            movie_uid: uid,
+            quality: src.quality,
+            drive_file_id: src.drive_file_id,
+            file_size: src.file_size,
+            audio_languages: src.audio_languages || ['Tamil'],
+            sa_account_index: saIndex
+          });
+        sErr = iErr;
+      }
+
+      if (!sErr) {
+        pushedCount++;
+      } else {
+        console.warn(`⚠️ Source Sync Warning [${src.quality}]:`, sErr.message);
+      }
+    }
+
+    // Clean up any old redundant sources for this movie that are no longer in min/max list
+    try {
+      const { data: currentDbSources } = await supabase
+        .from('movie_sources')
+        .select('id, drive_file_id')
+        .eq('movie_uid', uid);
+
+      if (Array.isArray(currentDbSources)) {
+        const redundantIds = currentDbSources
+          .filter(s => !validFileIdsForMovie.has(s.drive_file_id))
+          .map(s => s.id);
+
+        if (redundantIds.length > 0) {
+          await supabase.from('movie_sources').delete().in('id', redundantIds);
+          console.log(`🧹 Cleaned up ${redundantIds.length} redundant middle-size source(s) for "${meta.title}".`);
+        }
+      }
+    } catch (cleanErr) {
+      // Non-blocking cleanup warning
     }
 
     summary.push({
@@ -600,6 +723,7 @@ async function syncDriveToSupabase() {
       Year: meta.release_year,
       Rating: `${meta.rating} ★`,
       Duration: meta.duration,
+      Sources: movieGroup.sources.length,
       PosterSource: meta.poster_url.startsWith('data:') ? 'DYNAMIC_SVG' : 'AUTHENTIC_HD',
       Status: mErr ? 'FAILED' : 'PUSHED'
     });
@@ -611,9 +735,9 @@ async function syncDriveToSupabase() {
   if (summary.length > 0) {
     console.table(summary);
   }
-  console.log(`⏩ Skipped (Already Synced) : ${skippedCount} file(s)`);
-  console.log(`✨ Newly Pushed to Supabase  : ${pushedCount} file(s)`);
-  console.log('✅ Smart Drive-to-Supabase Incremental Sync Finished!\n');
+  console.log(`✨ Total Movies Synced      : ${moviePushedCount}`);
+  console.log(`✨ Total Sources Pushed     : ${pushedCount}`);
+  console.log('✅ Smart Drive-to-Supabase Sync Finished!\n');
 }
 
 syncDriveToSupabase();
