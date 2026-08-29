@@ -80,20 +80,16 @@ jobs:
         include:
           - name: 'tgstream (wrangler.jsonc)'
             config: 'wrangler.jsonc'
-            api_token: ${{ secrets.CF_API_TOKEN_1 || secrets.CLOUDFLARE_API_TOKEN }}
-            account_id: ${{ secrets.CF_ACCOUNT_ID_1 || secrets.CLOUDFLARE_ACCOUNT_ID }}
+            node_key: 'tgstream'
           - name: 'smd-stream-node-1'
             config: 'wrangler-1.toml'
-            api_token: ${{ secrets.CF_API_TOKEN_1 || secrets.CLOUDFLARE_API_TOKEN }}
-            account_id: ${{ secrets.CF_ACCOUNT_ID_1 || secrets.CLOUDFLARE_ACCOUNT_ID }}
+            node_key: 'node1'
           - name: 'smd-stream-node-2'
             config: 'wrangler-2.toml'
-            api_token: ${{ secrets.CF_API_TOKEN_2 || secrets.CF_API_TOKEN_1 || secrets.CLOUDFLARE_API_TOKEN }}
-            account_id: ${{ secrets.CF_ACCOUNT_ID_2 || secrets.CF_ACCOUNT_ID_1 || secrets.CLOUDFLARE_ACCOUNT_ID }}
+            node_key: 'node2'
           - name: 'smd-stream-node-3'
             config: 'wrangler-3.toml'
-            api_token: ${{ secrets.CF_API_TOKEN_3 || secrets.CF_API_TOKEN_1 || secrets.CLOUDFLARE_API_TOKEN }}
-            account_id: ${{ secrets.CF_ACCOUNT_ID_3 || secrets.CF_ACCOUNT_ID_1 || secrets.CLOUDFLARE_ACCOUNT_ID }}
+            node_key: 'node3'
     steps:
       - name: 📥 Checkout Codebase
         uses: actions/checkout@v4
@@ -109,8 +105,15 @@ jobs:
 
       - name: 🚀 Deploy Cloudflare Worker Node (${{ matrix.name }})
         env:
-          CLOUDFLARE_API_TOKEN: ${{ matrix.api_token }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ matrix.account_id }}
+          CF_API_TOKEN_1: ${{ secrets.CF_API_TOKEN_1 }}
+          CF_API_TOKEN_2: ${{ secrets.CF_API_TOKEN_2 }}
+          CF_API_TOKEN_3: ${{ secrets.CF_API_TOKEN_3 }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID_1: ${{ secrets.CF_ACCOUNT_ID_1 }}
+          CF_ACCOUNT_ID_2: ${{ secrets.CF_ACCOUNT_ID_2 }}
+          CF_ACCOUNT_ID_3: ${{ secrets.CF_ACCOUNT_ID_3 }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NODE_KEY: ${{ matrix.node_key }}
           STREAM_SECRET: ${{ secrets.STREAM_SECRET }}
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -120,9 +123,20 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
         run: |
+          if [ "$NODE_KEY" = "node2" ] && [ -n "$CF_API_TOKEN_2" ]; then
+            export CLOUDFLARE_API_TOKEN="$CF_API_TOKEN_2"
+            export CLOUDFLARE_ACCOUNT_ID="${CF_ACCOUNT_ID_2:-$CLOUDFLARE_ACCOUNT_ID}"
+          elif [ "$NODE_KEY" = "node3" ] && [ -n "$CF_API_TOKEN_3" ]; then
+            export CLOUDFLARE_API_TOKEN="$CF_API_TOKEN_3"
+            export CLOUDFLARE_ACCOUNT_ID="${CF_ACCOUNT_ID_3:-$CLOUDFLARE_ACCOUNT_ID}"
+          else
+            export CLOUDFLARE_API_TOKEN="${CF_API_TOKEN_1:-$CLOUDFLARE_API_TOKEN}"
+            export CLOUDFLARE_ACCOUNT_ID="${CF_ACCOUNT_ID_1:-$CLOUDFLARE_ACCOUNT_ID}"
+          fi
+
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "⚠️ Cloudflare API Token secret is missing for ${{ matrix.name }} in GitHub Repository Secrets."
-            echo "ℹ️ Please verify CF_API_TOKEN_1 / CF_API_TOKEN_2 / CF_API_TOKEN_3 in GitHub Settings."
+            echo "⚠️ Cloudflare API Token missing for ${{ matrix.name }}. Skipping deployment."
             exit 0
           fi
+
           npx wrangler deploy --config ${{ matrix.config }}
