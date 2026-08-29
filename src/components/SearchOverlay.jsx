@@ -1,18 +1,43 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Film, Star, Play, Sparkles, Filter, LayoutGrid, List, Flame } from 'lucide-react';
+import { Search, X, Film, Star, Play, Sparkles, Filter, LayoutGrid, List, Flame, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MovieCard from './MovieCard';
 import { triggerHaptic, useTelegramBackButton } from '../utils/telegram';
 import { filterMoviesByMultiParam, sanitizeTitle } from '../supabaseClient';
 import { generateDynamicSVGPoster } from '../utils/posters';
 
-export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, darkMode }) {
+export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, darkMode, streamingMode: initialStreamingMode }) {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('All');
   const [selectedQuality, setSelectedQuality] = useState('All');
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'grid'
   const inputRef = useRef(null);
+
+  const [streamingMode, setStreamingMode] = useState(() => {
+    try {
+      return initialStreamingMode || localStorage.getItem('smd_prime_streaming_mode') || 'both';
+    } catch (e) {
+      return 'both';
+    }
+  });
+
+  useEffect(() => {
+    const handleModeChange = (e) => {
+      try {
+        const mode = e?.detail || localStorage.getItem('smd_prime_streaming_mode') || 'both';
+        setStreamingMode(mode);
+      } catch (err) {}
+    };
+    window.addEventListener('storage', handleModeChange);
+    window.addEventListener('smd_streaming_mode_changed', handleModeChange);
+    document.addEventListener('smd_streaming_mode_changed', handleModeChange);
+    return () => {
+      window.removeEventListener('storage', handleModeChange);
+      window.removeEventListener('smd_streaming_mode_changed', handleModeChange);
+      document.removeEventListener('smd_streaming_mode_changed', handleModeChange);
+    };
+  }, []);
 
   // Bind Telegram BackButton & ESC key
   useTelegramBackButton(onClose);
@@ -353,17 +378,31 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                       </div>
                     </div>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerHaptic('heavy');
-                        onPlay(m);
-                      }}
-                      className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-600/40 shrink-0 transform group-hover:scale-110 transition-transform active:scale-95"
-                      title="Play Stream"
-                    >
-                      <Play className="w-5 h-5 fill-current ml-0.5" />
-                    </button>
+                    {streamingMode === 'download_only' ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          triggerHaptic('heavy');
+                          onSelectMovie(m);
+                        }}
+                        className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white flex items-center justify-center shadow-lg shadow-amber-600/40 shrink-0 transform group-hover:scale-110 transition-transform active:scale-95"
+                        title="Download Only Mode"
+                      >
+                        <Download className="w-5 h-5" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          triggerHaptic('heavy');
+                          onPlay(m);
+                        }}
+                        className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-600/40 shrink-0 transform group-hover:scale-110 transition-transform active:scale-95"
+                        title="Play Stream"
+                      >
+                        <Play className="w-5 h-5 fill-current ml-0.5" />
+                      </button>
+                    )}
                   </motion.div>
                 ))}
               </div>

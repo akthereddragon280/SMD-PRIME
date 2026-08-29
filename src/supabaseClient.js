@@ -590,3 +590,46 @@ export async function logDownloadAnalytics(movieUid, telegramUserId, qualityDown
   }
 }
 
+/**
+ * 6. Global Streaming Mode State Helpers
+ * Persists streaming mode ('both' | 'download_only' | 'stream_only') across Supabase & LocalStorage.
+ */
+export async function getGlobalStreamingMode() {
+  try {
+    const { data } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'streaming_mode')
+      .maybeSingle();
+    if (data && data.value) {
+      localStorage.setItem('smd_prime_streaming_mode', data.value);
+      return data.value;
+    }
+  } catch (e) {}
+  try {
+    return localStorage.getItem('smd_prime_streaming_mode') || 'both';
+  } catch (e) {
+    return 'both';
+  }
+}
+
+export async function setGlobalStreamingMode(mode) {
+  try {
+    localStorage.setItem('smd_prime_streaming_mode', mode);
+  } catch (e) {}
+
+  // Broadcast event globally across window and document
+  const evt = new CustomEvent('smd_streaming_mode_changed', { detail: mode });
+  window.dispatchEvent(evt);
+  document.dispatchEvent(evt);
+
+  try {
+    await supabase
+      .from('system_settings')
+      .upsert({ key: 'streaming_mode', value: mode, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  } catch (e) {
+    console.warn('System settings upsert note:', e);
+  }
+}
+
+

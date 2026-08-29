@@ -5,9 +5,9 @@ import {
   Radio, Layers, Filter, RotateCcw, ChevronDown, ChevronUp, Download, 
   Search, Ban, Shield, Clock, Calendar, ExternalLink, ArrowRight, User
 } from 'lucide-react';
-import { supabase, sanitizeTitle } from '../supabaseClient';
+import { supabase, sanitizeTitle, getGlobalStreamingMode, setGlobalStreamingMode } from '../supabaseClient';
 import { getAdminUserIds, addAdminUser, removeAdminUser } from '../utils/admin';
-import { openExternalLink } from '../utils/telegram';
+import { openExternalLink, triggerHaptic } from '../utils/telegram';
 import { registerNodesFromDiagnostics } from '../utils/loadBalancer';
 
 export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
@@ -60,13 +60,16 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
     }
   });
 
+  useEffect(() => {
+    getGlobalStreamingMode().then(mode => {
+      if (mode) setStreamingModeState(mode);
+    });
+  }, []);
+
   const handleStreamingModeChange = (newMode) => {
     triggerHaptic('medium');
     setStreamingModeState(newMode);
-    try {
-      localStorage.setItem('smd_prime_streaming_mode', newMode);
-      window.dispatchEvent(new Event('smd_streaming_mode_changed'));
-    } catch (e) {}
+    setGlobalStreamingMode(newMode);
   };
 
   const runInfrastructureCheck = useCallback(async () => {

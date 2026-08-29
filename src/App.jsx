@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching, getCachedMovies } from './supabaseClient';
+import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching, getCachedMovies, getGlobalStreamingMode } from './supabaseClient';
 import Header from './components/Header';
 import HeroBanner from './components/HeroBanner';
 import MovieRow from './components/MovieRow';
@@ -191,19 +191,25 @@ export default function App() {
     }
   });
 
-  // Listen for admin streaming mode updates live
+  // Listen for admin streaming mode updates live across DB and events
   useEffect(() => {
-    const handleStorageChange = () => {
+    getGlobalStreamingMode().then(mode => {
+      if (mode) setStreamingMode(mode);
+    });
+
+    const handleStorageChange = (e) => {
       try {
-        const mode = localStorage.getItem('smd_prime_streaming_mode') || 'both';
+        const mode = e?.detail || localStorage.getItem('smd_prime_streaming_mode') || 'both';
         setStreamingMode(mode);
-      } catch (e) {}
+      } catch (err) {}
     };
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('smd_streaming_mode_changed', handleStorageChange);
+    document.addEventListener('smd_streaming_mode_changed', handleStorageChange);
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('smd_streaming_mode_changed', handleStorageChange);
+      document.removeEventListener('smd_streaming_mode_changed', handleStorageChange);
     };
   }, []);
 
@@ -552,8 +558,13 @@ export default function App() {
           }}
           onPlay={(m) => {
             setIsSearchOpen(false);
-            setActivePlayingMovie(m);
+            if (streamingMode === 'download_only') {
+              setSelectedMovie(m);
+            } else {
+              setActivePlayingMovie(m);
+            }
           }}
+          streamingMode={streamingMode}
           darkMode={darkMode}
         />
       )}
