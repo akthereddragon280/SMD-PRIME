@@ -64,15 +64,16 @@ export function useNavigationHistory({
 
     // 1. Telegram WebApp Native BackButton Integration
     try {
-      if (typeof window !== 'undefined' && (window.Telegram?.WebApp?.BackButton || WebApp?.BackButton)) {
-        const tgBackButton = window.Telegram?.WebApp?.BackButton || WebApp.BackButton;
+      const tg = window.Telegram?.WebApp || WebApp;
+      const isSupported = tg?.isVersionAtLeast ? tg.isVersionAtLeast('6.1') : true;
 
+      if (typeof window !== 'undefined' && tg?.BackButton && isSupported) {
         if (hasActiveView) {
-          tgBackButton.show();
-          tgBackButton.onClick(handleBackNavigation);
+          if (typeof tg.BackButton.show === 'function') tg.BackButton.show();
+          if (typeof tg.BackButton.onClick === 'function') tg.BackButton.onClick(handleBackNavigation);
         } else {
-          tgBackButton.hide();
-          tgBackButton.offClick(handleBackNavigation);
+          if (typeof tg.BackButton.hide === 'function') tg.BackButton.hide();
+          if (typeof tg.BackButton.offClick === 'function') tg.BackButton.offClick(handleBackNavigation);
         }
       }
     } catch (e) {

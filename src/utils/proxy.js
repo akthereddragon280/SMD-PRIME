@@ -60,23 +60,29 @@ export function extractCleanDriveFileId(rawInput) {
  * @param {string} quality - Optional stream quality
  * @returns {string} Dynamic load-balanced & cryptographically signed streaming URL
  */
-export function getProxyStreamUrl(fileId, title = '', quality = '') {
+export function getProxyStreamUrl(fileId, title = '', quality = '', cloneFileIds = []) {
   if (!fileId) return '';
   
   // Extract and sanitize clean raw drive file ID
-  const cleanId = extractCleanDriveFileId(fileId);
-  if (!cleanId) return '';
+  const cleanPrimaryId = extractCleanDriveFileId(fileId);
+  if (!cleanPrimaryId) return '';
+  
+  let allIds = [cleanPrimaryId];
+  if (Array.isArray(cloneFileIds) && cloneFileIds.length > 0) {
+    const cleanClones = cloneFileIds.map(id => extractCleanDriveFileId(id)).filter(Boolean);
+    allIds = Array.from(new Set([...allIds, ...cleanClones]));
+  }
   
   // 4 Hours Expiration Window (14,400 seconds)
   const expiresAt = Math.floor(Date.now() / 1000) + 14400;
-  const obfuscatedFid = btoa(cleanId).replace(/=/g, '');
-  const token = generateFastTokenSync(cleanId, expiresAt);
+  const obfuscatedFid = btoa(cleanPrimaryId).replace(/=/g, '');
+  const token = generateFastTokenSync(cleanPrimaryId, expiresAt);
 
   // Dynamic Load Balancer Node Selection (always uses getOptimalWorkerUrl())
   const baseUrl = getOptimalWorkerUrl().replace(/\/+$/, '');
 
-  // FORCE MP4 / PROGRESSIVE: Always append container=mp4&progressive=1
-  let url = `${baseUrl}/?id=${encodeURIComponent(cleanId)}&fid=${encodeURIComponent(obfuscatedFid)}&exp=${expiresAt}&token=${token}&container=mp4&progressive=1`;
+  const fileIdsParam = encodeURIComponent(allIds.join(','));
+  let url = `${baseUrl}/?fileIds=${fileIdsParam}&id=${encodeURIComponent(cleanPrimaryId)}&fid=${encodeURIComponent(obfuscatedFid)}&exp=${expiresAt}&token=${token}&container=mp4&progressive=1`;
   if (title) url += `&title=${encodeURIComponent(title)}`;
   if (quality) url += `&quality=${encodeURIComponent(quality)}`;
   return url;

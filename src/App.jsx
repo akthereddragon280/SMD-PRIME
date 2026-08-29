@@ -10,7 +10,7 @@ import AdminModal from './components/AdminModal';
 import PlayerGateway from './components/PlayerGateway';
 import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
 import { useNavigationHistory } from './utils/useNavigationHistory';
-import { Loader2, Film } from 'lucide-react';
+import { Loader2, Film, History, Flame, Zap, Compass, Clapperboard } from 'lucide-react';
 
 export default function App() {
   // Check if current route is the HTTPS Bounce Gateway
@@ -182,14 +182,52 @@ export default function App() {
     loadDatabaseAndUser();
   }, []);
 
+  // Admin Streaming Mode State ('both' | 'download_only' | 'stream_only')
+  const [streamingMode, setStreamingMode] = useState(() => {
+    try {
+      return localStorage.getItem('smd_prime_streaming_mode') || 'both';
+    } catch (e) {
+      return 'both';
+    }
+  });
+
+  // Listen for admin streaming mode updates live
+  useEffect(() => {
+    const handleStorageChange = () => {
+      try {
+        const mode = localStorage.getItem('smd_prime_streaming_mode') || 'both';
+        setStreamingMode(mode);
+      } catch (e) {}
+    };
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('smd_streaming_mode_changed', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('smd_streaming_mode_changed', handleStorageChange);
+    };
+  }, []);
+
   // Filter movies strictly from Google Drive synced list
   const heroMovie = moviesList.length > 0 ? (moviesList.find((m) => m.isHero) || moviesList[0]) : null;
-  const trendingMovies = moviesList.filter((m) => m.trending);
-  const actionMovies = moviesList.filter((m) => m.genre === 'Action');
-  const sciFiMovies = moviesList.filter((m) => m.genre === 'Sci-Fi');
-  const dramaMovies = moviesList.filter((m) => m.genre === 'Drama');
+  const trendingMovies = moviesList.filter((m) => m.trending || Number(m.rating) >= 7.5);
+  const actionMovies = moviesList.filter((m) => /action/i.test(m.genre || ''));
+  const sciFiMovies = moviesList.filter((m) => /sci/i.test(m.genre || ''));
+  const dramaMovies = moviesList.filter((m) => /drama/i.test(m.genre || ''));
 
-  const categories = ['All', 'Trending', 'Action', 'Sci-Fi', 'Drama'];
+  const categories = ['All', 'Trending', 'Action', 'Sci-Fi', 'Drama', 'Thriller', 'Comedy'];
+
+  // Dynamic Live Category File Counts Calculation Engine
+  const categoryCounts = React.useMemo(() => {
+    const counts = {};
+    counts['All'] = moviesList.length;
+    counts['Trending'] = trendingMovies.length;
+    counts['Action'] = actionMovies.length;
+    counts['Sci-Fi'] = sciFiMovies.length;
+    counts['Drama'] = dramaMovies.length;
+    counts['Thriller'] = moviesList.filter((m) => /thriller/i.test(m.genre || '')).length;
+    counts['Comedy'] = moviesList.filter((m) => /comedy/i.test(m.genre || '')).length;
+    return counts;
+  }, [moviesList, trendingMovies, actionMovies, sciFiMovies, dramaMovies]);
 
   return (
     <div className={`min-h-screen transition-colors duration-500 relative flex flex-col items-stretch justify-start w-full ${
@@ -229,7 +267,7 @@ export default function App() {
           setActiveCategory={setActiveCategory}
         />
 
-        {/* Category Tab Pills (Zero-Glitch Dissolve Bar) */}
+        {/* Category Tab Pills (Zero-Glitch Dissolve Bar with Live File Counts) */}
         <div className="sticky top-[61px] z-30 pointer-events-none overflow-hidden">
           <div className={`w-full px-4 py-2 transition-all duration-200 ease-out transform origin-top ${
             showCategoryBar
@@ -241,24 +279,36 @@ export default function App() {
               : 'bg-white/85 backdrop-blur-3xl backdrop-saturate-200 border-slate-200/80 shadow-md'
           }`}>
             <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-touch py-0.5">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => {
-                    triggerHaptic('light');
-                    setActiveCategory(cat);
-                  }}
-                  className={`px-4 py-2 rounded-2xl text-xs font-extrabold transition-all whitespace-nowrap active:scale-95 ${
-                    activeCategory === cat
-                      ? 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white shadow-lg shadow-red-600/35 border border-red-400/40 transform scale-[1.02]'
-                      : darkMode
-                        ? 'bg-zinc-900/90 text-zinc-300 border border-zinc-800/90 hover:bg-zinc-800/80 backdrop-blur-md'
-                        : 'bg-white/90 text-slate-700 border border-slate-200/90 shadow-xs hover:bg-slate-100/90 backdrop-blur-md'
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
+              {categories.map((cat) => {
+                const count = categoryCounts[cat] ?? 0;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setActiveCategory(cat);
+                    }}
+                    className={`px-3.5 py-1.5 rounded-2xl text-xs font-extrabold transition-all whitespace-nowrap active:scale-95 flex items-center gap-1.5 ${
+                      activeCategory === cat
+                        ? 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white shadow-lg shadow-red-600/35 border border-red-400/40 transform scale-[1.02]'
+                        : darkMode
+                          ? 'bg-zinc-900/90 text-zinc-300 border border-zinc-800/90 hover:bg-zinc-800/80 backdrop-blur-md'
+                          : 'bg-white/90 text-slate-700 border border-slate-200/90 shadow-xs hover:bg-slate-100/90 backdrop-blur-md'
+                    }`}
+                  >
+                    <span>{cat}</span>
+                    <span className={`px-1.5 py-0.2 text-[10px] font-mono rounded-full font-black ${
+                      activeCategory === cat
+                        ? 'bg-black/25 text-white'
+                        : darkMode
+                          ? 'bg-zinc-800 text-zinc-400'
+                          : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -294,9 +344,16 @@ export default function App() {
                 {heroMovie && (activeCategory === 'All' || activeCategory === 'Trending') && (
                   <HeroBanner
                     movie={heroMovie}
-                    onPlay={(m) => setActivePlayingMovie(m)}
+                    onPlay={(m) => {
+                      if (streamingMode === 'download_only') {
+                        setSelectedMovie(m);
+                      } else {
+                        setActivePlayingMovie(m);
+                      }
+                    }}
                     onSelectMovie={(m) => setSelectedMovie(m)}
                     darkMode={darkMode}
+                    streamingMode={streamingMode}
                   />
                 )}
 
@@ -306,7 +363,13 @@ export default function App() {
                     title="Continue Watching"
                     movies={continueWatchingList}
                     onSelectMovie={(m) => setSelectedMovie(m)}
-                    onPlay={(m) => setActivePlayingMovie(m)}
+                    onPlay={(m) => {
+                      if (streamingMode === 'download_only') {
+                        setSelectedMovie(m);
+                      } else {
+                        setActivePlayingMovie(m);
+                      }
+                    }}
                     darkMode={darkMode}
                     icon={<History className="w-5 h-5 text-red-600 animate-pulse" />}
                   />
@@ -320,7 +383,13 @@ export default function App() {
                         title="Trending Now"
                         movies={trendingMovies}
                         onSelectMovie={(m) => setSelectedMovie(m)}
-                        onPlay={(m) => setActivePlayingMovie(m)}
+                        onPlay={(m) => {
+                          if (streamingMode === 'download_only') {
+                            setSelectedMovie(m);
+                          } else {
+                            setActivePlayingMovie(m);
+                          }
+                        }}
                         darkMode={darkMode}
                         onViewAll={() => setActiveCategory('Trending')}
                         icon={<Flame className="w-5 h-5 fill-red-600 text-red-600 animate-pulse" />}
@@ -332,7 +401,13 @@ export default function App() {
                         title="Action Blockbusters"
                         movies={actionMovies}
                         onSelectMovie={(m) => setSelectedMovie(m)}
-                        onPlay={(m) => setActivePlayingMovie(m)}
+                        onPlay={(m) => {
+                          if (streamingMode === 'download_only') {
+                            setSelectedMovie(m);
+                          } else {
+                            setActivePlayingMovie(m);
+                          }
+                        }}
                         darkMode={darkMode}
                         onViewAll={() => setActiveCategory('Action')}
                         icon={<Zap className="w-5 h-5 text-amber-500" />}
@@ -344,7 +419,13 @@ export default function App() {
                         title="Sci-Fi & Cyberpunk"
                         movies={sciFiMovies}
                         onSelectMovie={(m) => setSelectedMovie(m)}
-                        onPlay={(m) => setActivePlayingMovie(m)}
+                        onPlay={(m) => {
+                          if (streamingMode === 'download_only') {
+                            setSelectedMovie(m);
+                          } else {
+                            setActivePlayingMovie(m);
+                          }
+                        }}
                         darkMode={darkMode}
                         onViewAll={() => setActiveCategory('Sci-Fi')}
                         icon={<Compass className="w-5 h-5 text-cyan-400" />}
@@ -356,7 +437,13 @@ export default function App() {
                         title="Dramatic Classics"
                         movies={dramaMovies}
                         onSelectMovie={(m) => setSelectedMovie(m)}
-                        onPlay={(m) => setActivePlayingMovie(m)}
+                        onPlay={(m) => {
+                          if (streamingMode === 'download_only') {
+                            setSelectedMovie(m);
+                          } else {
+                            setActivePlayingMovie(m);
+                          }
+                        }}
                         darkMode={darkMode}
                         onViewAll={() => setActiveCategory('Drama')}
                         icon={<Clapperboard className="w-5 h-5 text-emerald-400" />}
@@ -368,7 +455,13 @@ export default function App() {
                       title="All Synced Library Files"
                       movies={moviesList}
                       onSelectMovie={(m) => setSelectedMovie(m)}
-                      onPlay={(m) => setActivePlayingMovie(m)}
+                      onPlay={(m) => {
+                        if (streamingMode === 'download_only') {
+                          setSelectedMovie(m);
+                        } else {
+                          setActivePlayingMovie(m);
+                        }
+                      }}
                       darkMode={darkMode}
                       onViewAll={() => setIsSearchOpen(true)}
                     />
@@ -389,7 +482,13 @@ export default function App() {
                             <MovieRow
                               movies={[movie]}
                               onSelectMovie={(m) => setSelectedMovie(m)}
-                              onPlay={(m) => setActivePlayingMovie(m)}
+                              onPlay={(m) => {
+                                if (streamingMode === 'download_only') {
+                                  setSelectedMovie(m);
+                                } else {
+                                  setActivePlayingMovie(m);
+                                }
+                              }}
                               darkMode={darkMode}
                             />
                           </div>
@@ -447,8 +546,14 @@ export default function App() {
         <SearchOverlay
           movies={moviesList}
           onClose={closeSearch}
-          onSelectMovie={(m) => setSelectedMovie(m)}
-          onPlay={(m) => setActivePlayingMovie(m)}
+          onSelectMovie={(m) => {
+            setIsSearchOpen(false);
+            setSelectedMovie(m);
+          }}
+          onPlay={(m) => {
+            setIsSearchOpen(false);
+            setActivePlayingMovie(m);
+          }}
           darkMode={darkMode}
         />
       )}

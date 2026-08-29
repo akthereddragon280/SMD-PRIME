@@ -98,7 +98,7 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
         } p-4 sm:p-6 flex flex-col`}
       >
         {/* Top Header & Search Input */}
-        <div className="max-w-4xl mx-auto w-full flex flex-col gap-3 mb-4">
+        <div className="max-w-full lg:max-w-7xl 2xl:max-w-[90rem] mx-auto w-full flex flex-col gap-3 mb-4">
           <div className="flex items-center gap-3">
             <div className={`flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl border transition-all ${
               darkMode 
@@ -206,7 +206,7 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
         </div>
 
         {/* Results Header Bar with View Mode Toggle */}
-        <div className={`max-w-4xl mx-auto w-full flex items-center justify-between mb-4 border-b pb-3 ${
+        <div className={`max-w-full lg:max-w-7xl 2xl:max-w-[90rem] mx-auto w-full flex items-center justify-between mb-4 border-b pb-3 ${
           darkMode ? 'border-zinc-800/80' : 'border-slate-200'
         }`}>
           <div className="flex items-center gap-2">
@@ -279,7 +279,7 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
         </div>
 
         {/* Unified Results Section */}
-        <div className="max-w-4xl mx-auto w-full flex-1 pb-16">
+        <div className="max-w-full lg:max-w-7xl 2xl:max-w-[90rem] mx-auto w-full flex-1 pb-16">
           {filteredMovies.length > 0 ? (
             viewMode === 'list' ? (
               /* SLEEK DETAILED LIST VIEW */
@@ -292,7 +292,6 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                     onClick={() => {
                       triggerHaptic('medium');
                       onSelectMovie(m);
-                      onClose();
                     }}
                     className={`p-3.5 rounded-2xl border transition-all flex items-center gap-4 cursor-pointer group ${
                       darkMode 
@@ -359,7 +358,6 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                         e.stopPropagation();
                         triggerHaptic('heavy');
                         onPlay(m);
-                        onClose();
                       }}
                       className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-600/40 shrink-0 transform group-hover:scale-110 transition-transform active:scale-95"
                       title="Play Stream"
@@ -371,17 +369,15 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
               </div>
             ) : (
               /* GRID VIEW */
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 sm:gap-5">
                 {filteredMovies.map((movie) => (
                   <div key={movie.id} className="flex justify-center">
                     <MovieCard
                       movie={movie}
                       onSelectMovie={(m) => {
-                        onClose();
                         onSelectMovie(m);
                       }}
                       onPlay={(m) => {
-                        onClose();
                         onPlay(m);
                       }}
                       darkMode={darkMode}

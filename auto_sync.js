@@ -162,7 +162,7 @@ function parseAndSanitizeFileName(fullName, fileSizeInBytes) {
   cleanTitle = cleanTitle
     .replace(/\[.*?\]/g, '')
     .replace(/\(.*?\)/g, '')
-    .replace(/\b(BluRay|HDRp|HQ|HDRip|WEB-DL|HDR|x264|x265|HEVC|DD\+5\.1|ESub|MSub|AAC|Tamil|Tam|Tel|Hin|Eng|TRUE|S\d+|^EP.*)\b/gi, '')
+    .replace(/\b(BluRay|HDRp|HQ|HDRip|WEB-DL|HDR|x264|x265|HEVC|DD\+5\.1|ESub|MSub|AAC|Tamil|Tam|Telugu|Tel|Hindi|Hin|Kannada|Kan|Malayalam|Mal|English|Eng|Multi|Dual|Audio|TRUE|S\d+|^EP.*)\b/gi, '')
     .replace(/[-_.:()]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -173,14 +173,26 @@ function parseAndSanitizeFileName(fullName, fileSizeInBytes) {
     cleanTitle = fullName.replace(/\.(mkv|mp4|avi)$/i, '').replace(/[-_]/g, ' ').trim();
   }
 
+  // Multilingual Canonical Title Aliasing & Normalization
+  let normalizedTitle = cleanTitle;
+  const titleLower = cleanTitle.toLowerCase();
+
+  if (titleLower.includes('jana nayakudu') || titleLower.includes('jana nayagan')) {
+    normalizedTitle = 'Jana Nayagan';
+  } else if (titleLower.includes('guntur kaaram') || titleLower.includes('guntur karam')) {
+    normalizedTitle = 'Guntur Kaaram';
+  } else if (titleLower.includes('devara')) {
+    normalizedTitle = 'Devara';
+  }
+
   let codec = 'H264';
   if (/(hevc|x265|h\.?265)/i.test(fullName)) codec = 'HEVC';
   else if (/(x264|h\.?264|avc)/i.test(fullName)) codec = 'H264';
 
   const size_gb = fileSizeInBytes > 0 ? parseFloat((fileSizeInBytes / (1024 * 1024 * 1024)).toFixed(2)) : 1.5;
 
-  const uid = `${cleanTitle.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${year || 2026}`;
-  return { cleanTitle, year, quality, audioLangs, video_codec: codec, size_gb, uid };
+  const uid = `${normalizedTitle.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${year || 2026}`;
+  return { cleanTitle: normalizedTitle, year, quality, audioLangs, video_codec: codec, size_gb, uid };
 }
 
 async function runAutoSyncPass() {

@@ -46,30 +46,53 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
 
   /**
-   * High ROI Loading Validation Engine:
-   * Loading symbol hides ONLY AFTER video duration is fetched AND video plays for 0.5s.
-   * Otherwise, loading symbol remains visible!
+   * Ultra-Accurate & Bulletproof Loading Validation Engine:
+   * 1. If video is PAUSED, loading spinner MUST NEVER SHOW if metadata/frame is ready.
+   * 2. If video is PLAYING, loading spinner is dismissed if readyState >= 3 OR buffered time covers currentTime + 0.5s.
+   * 3. Loading spinner shows ONLY during initial load, active buffer stall during playback, or node failover.
    */
   const checkAndDismissLoading = (vEl) => {
     if (!vEl) return;
-    const dur = vEl.duration;
-    const curTime = vEl.currentTime;
-
-    // 1. Duration must be fetched (> 0 and finite)
-    const isDurationFetched = Boolean(dur && isFinite(dur) && dur > 0);
-
-    // 2. Track 0.5s playback duration
-    if (!vEl.paused && curTime > 0 && !playStartTimeRef.current) {
-      playStartTimeRef.current = Date.now();
+    
+    // If video error is active, stop loading overlay
+    if (videoError) {
+      setLoading(false);
+      return;
     }
 
-    const playElapsed = playStartTimeRef.current ? (Date.now() - playStartTimeRef.current) : 0;
-    const hasPlayedHalfSecond = playElapsed >= 500 || curTime >= 0.5;
+    const dur = vEl.duration;
+    const curTime = vEl.currentTime;
+    const readyState = vEl.readyState; // 0: HAVE_NOTHING, 1: HAVE_METADATA, 2: HAVE_CURRENT_DATA, 3: HAVE_FUTURE_DATA, 4: HAVE_ENOUGH_DATA
 
-    // Dismiss loading spinner ONLY when BOTH duration is fetched AND 0.5s of playback has elapsed
-    if (isDurationFetched && hasPlayedHalfSecond && !vEl.paused) {
+    const isDurationFetched = Boolean(dur && isFinite(dur) && dur > 0);
+
+    // Check if current time + 0.5s is already buffered in memory
+    let isBufferedAhead = false;
+    if (vEl.buffered && vEl.buffered.length > 0) {
+      const targetCheck = curTime + 0.5;
+      for (let i = 0; i < vEl.buffered.length; i++) {
+        if (vEl.buffered.start(i) <= curTime && vEl.buffered.end(i) >= targetCheck) {
+          isBufferedAhead = true;
+          break;
+        }
+      }
+    }
+
+    // Rule A: If video is PAUSED manually by user
+    if (vEl.paused) {
+      // If we have at least metadata/current frame (readyState >= 1 or isDurationFetched or curTime > 0), DO NOT show spinner!
+      if (readyState >= 1 || isDurationFetched || curTime > 0) {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Rule B: If video is PLAYING
+    // Dismiss loading if readyState >= 3 (HAVE_FUTURE_DATA/HAVE_ENOUGH_DATA) OR isBufferedAhead OR curTime > 0.5
+    if ((readyState >= 3 || isBufferedAhead || curTime >= 0.5) && isDurationFetched) {
       setLoading(false);
-    } else {
+    } else if (readyState <= 1 && curTime === 0) {
+      // Still initializing initial stream
       setLoading(true);
     }
   };
@@ -197,11 +220,32 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
 
         if (availableSources.length > 0) {
           setSources(availableSources);
+          
+          // Extract unique audio languages available across sources (Tamil prioritized first)
+          const extractedLangs = new Set();
+          availableSources.forEach(s => {
+            if (s.language) extractedLangs.add(s.language);
+            if (Array.isArray(s.audio_languages)) {
+              s.audio_languages.forEach(l => extractedLangs.add(l));
+            }
+          });
+
+          if (extractedLangs.size > 0) {
+            const langsList = Array.from(extractedLangs);
+            langsList.sort((a, b) => {
+              if (a.toLowerCase().includes('tamil')) return -1;
+              if (b.toLowerCase().includes('tamil')) return 1;
+              return a.localeCompare(b);
+            });
+            setAudioTracks(langsList);
+            setCurrentAudio(langsList[0]);
+          }
+
           const defaultSrc = availableSources.find(s => s.quality === '1080p') || 
                              availableSources.find(s => s.quality === '720p') || 
                              availableSources[0];
           setCurrentQuality(defaultSrc.quality || '1080p');
-          setActiveVideoUrl(getProxyStreamUrl(defaultSrc.drive_file_id || movie?.file_id));
+          setActiveVideoUrl(getProxyStreamUrl(defaultSrc.drive_file_id || movie?.file_id, movieTitle, defaultSrc.quality || '1080p', defaultSrc.clone_file_ids));
         } else {
           const fallbackId = movie?.file_id || '1djKAD3UQmBPgkeBBLCrZjAW-D4Fod_Ng';
           const defaultSources = [
@@ -211,7 +255,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
           ];
           setSources(defaultSources);
           setCurrentQuality('1080p');
-          setActiveVideoUrl(getProxyStreamUrl(fallbackId));
+          setActiveVideoUrl(getProxyStreamUrl(fallbackId, movieTitle, '1080p'));
         }
       } catch (err) {
         console.error('Failed to fetch movie sources:', err);
@@ -340,7 +384,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     const driveId = sourceObj.drive_file_id || movie?.file_id;
 
     setCurrentQuality(targetQuality);
-    const newUrl = getProxyStreamUrl(driveId);
+    const newUrl = getProxyStreamUrl(driveId, movieTitle, targetQuality, sourceObj.clone_file_ids);
     setActiveVideoUrl(newUrl);
 
     // Telemetry log for quality switch
@@ -360,12 +404,50 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     }, 400);
   };
 
-  // 5. Audio Language Switcher
+  // 5. Seamless Multi-Language Audio Switcher Engine (0ms Timestamp Resume)
   const handleAudioChange = (lang) => {
-    triggerHaptic('light');
+    triggerHaptic('medium');
+    const savedTimestamp = videoRef.current?.currentTime || currentTime;
     setCurrentAudio(lang);
+
+    // 1. Check if there is a specific stream source matching the selected language
+    const matchingSource = sources.find(s => 
+      s.language === lang || 
+      (typeof s.quality === 'string' && s.quality.toLowerCase().includes(lang.toLowerCase())) ||
+      (Array.isArray(s.audio_languages) && s.audio_languages.length === 1 && s.audio_languages[0] === lang)
+    ) || sources.find(s => Array.isArray(s.audio_languages) && s.audio_languages.includes(lang)) || sources[0];
+
+    if (matchingSource && matchingSource.drive_file_id) {
+      const targetQuality = matchingSource.quality || currentQuality || '1080p';
+      let newUrl = getProxyStreamUrl(matchingSource.drive_file_id, movieTitle, targetQuality, matchingSource.clone_file_ids);
+      if (!newUrl.includes('&audio_lang=')) {
+        newUrl += `&audio_lang=${encodeURIComponent(lang)}`;
+      }
+      
+      setActiveVideoUrl(newUrl);
+
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.currentTime = savedTimestamp;
+          videoRef.current.playbackRate = playbackSpeed;
+          videoRef.current.play().catch(() => {});
+          setIsPlaying(true);
+        }
+      }, 350);
+    } else if (videoRef.current?.audioTracks && videoRef.current.audioTracks.length > 0) {
+      // 2. Native HTML5 AudioTrack API fallback
+      const tracks = videoRef.current.audioTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        if (tracks[i].language === lang || tracks[i].label?.toLowerCase().includes(lang.toLowerCase())) {
+          tracks[i].enabled = true;
+        } else {
+          tracks[i].enabled = false;
+        }
+      }
+    }
+
     setTouchFeedback(`Audio: ${lang}`);
-    setTimeout(() => setTouchFeedback(null), 1000);
+    setTimeout(() => setTouchFeedback(null), 1200);
   };
 
   // 6. Subtitle Track Switcher
@@ -434,24 +516,32 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   const toggleFullscreen = async () => {
     triggerHaptic('medium');
 
-    // Rule 1: Always call expand() on Telegram WebApp
+    const isInsideTelegram = Boolean(window.Telegram?.WebApp?.initData && window.Telegram.WebApp.initData.length > 0);
+
     if (window.Telegram?.WebApp?.expand) {
       window.Telegram.WebApp.expand();
     }
 
-    if (!isFakeFullscreen && !document.fullscreenElement) {
+    if (!isFakeFullscreen && !isFullscreen && !document.fullscreenElement) {
       try {
         if (containerRef.current?.requestFullscreen) {
           await containerRef.current.requestFullscreen();
+        } else if (videoRef.current?.webkitEnterFullscreen) {
+          videoRef.current.webkitEnterFullscreen();
         }
+        
         if (window.screen?.orientation?.lock) {
-          await window.screen.orientation.lock('landscape');
+          await window.screen.orientation.lock('landscape').catch(() => {});
         }
         setIsFullscreen(true);
       } catch (err) {
-        // Fallback for Telegram Mini App or devices blocking orientation lock
-        setIsFakeFullscreen(true);
-        setIsFullscreen(true);
+        // Fallback: ONLY inside Telegram Mini App activate 90-degree CSS Fake Landscape
+        if (isInsideTelegram) {
+          setIsFakeFullscreen(true);
+          setIsFullscreen(true);
+        } else {
+          setIsFullscreen(true);
+        }
       }
     } else {
       if (document.fullscreenElement && document.exitFullscreen) {
@@ -652,6 +742,89 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
     };
   }, []);
 
+  // 11. Laptop / Desktop Keyboard Media Controls Engine
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ignore keypresses if user is typing in an input field
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+        return;
+      }
+
+      switch (e.code) {
+        case 'Space':
+        case 'KeyK':
+          e.preventDefault();
+          togglePlay();
+          setShowControls(true);
+          resetControlsTimeout();
+          break;
+        case 'ArrowLeft':
+        case 'KeyJ':
+          e.preventDefault();
+          skipTime(-10);
+          setShowControls(true);
+          resetControlsTimeout();
+          break;
+        case 'ArrowRight':
+        case 'KeyL':
+          e.preventDefault();
+          skipTime(10);
+          setShowControls(true);
+          resetControlsTimeout();
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          if (videoRef.current) {
+            const nextVol = Math.min(1, (videoRef.current.volume || 0) + 0.1);
+            videoRef.current.volume = nextVol;
+            videoRef.current.muted = false;
+            setVolume(nextVol);
+            setIsMuted(false);
+            setGestureHUD({ type: 'volume', value: Math.round(nextVol * 100) });
+            if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
+            hudTimeoutRef.current = setTimeout(() => setGestureHUD(null), 800);
+          }
+          setShowControls(true);
+          resetControlsTimeout();
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          if (videoRef.current) {
+            const nextVol = Math.max(0, (videoRef.current.volume || 0) - 0.1);
+            videoRef.current.volume = nextVol;
+            videoRef.current.muted = nextVol === 0;
+            setVolume(nextVol);
+            setIsMuted(nextVol === 0);
+            setGestureHUD({ type: 'volume', value: Math.round(nextVol * 100) });
+            if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
+            hudTimeoutRef.current = setTimeout(() => setGestureHUD(null), 800);
+          }
+          setShowControls(true);
+          resetControlsTimeout();
+          break;
+        case 'KeyF':
+          e.preventDefault();
+          toggleFullscreen();
+          break;
+        case 'KeyM':
+          e.preventDefault();
+          toggleMute();
+          break;
+        case 'Escape':
+          if (isFakeFullscreen || isFullscreen) {
+            e.preventDefault();
+            toggleFullscreen();
+          }
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePlay, skipTime, toggleFullscreen, toggleMute, isFakeFullscreen, isFullscreen]);
+
   return (
     <AnimatePresence>
       <motion.div
@@ -804,28 +977,28 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                   <Settings className="w-4.5 h-4.5" />
                 </button>
 
-                {/* Premium Master Settings Modal / Popover Sheet */}
+                {/* Premium Glassmorphism Master Settings Modal / Popover Sheet */}
                 <AnimatePresence>
                   {showSettingsModal && (
                     <motion.div
-                      initial={{ opacity: 0, scale: 0.9, y: -10 }}
+                      initial={{ opacity: 0, scale: 0.92, y: -10 }}
                       animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.9, y: -10 }}
-                      transition={{ duration: 0.18 }}
-                      className="absolute right-0 top-12 w-72 rounded-3xl bg-zinc-950/95 border border-zinc-800/90 p-4 z-50 shadow-2xl backdrop-blur-2xl text-white"
+                      exit={{ opacity: 0, scale: 0.92, y: -10 }}
+                      transition={{ duration: 0.18, ease: 'easeOut' }}
+                      className="absolute right-0 top-12 w-72 sm:w-80 rounded-3xl bg-black/40 border border-white/20 p-3.5 sm:p-4 z-50 shadow-[0_25px_70px_rgba(0,0,0,0.6)] backdrop-blur-2xl text-white backdrop-saturate-200 ring-1 ring-white/10"
                     >
                       {/* Modal Header */}
-                      <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80 mb-2">
+                      <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-2 px-1">
                         <div className="flex items-center gap-2">
                           {settingsTab !== 'main' && (
                             <button
                               onClick={() => setSettingsTab('main')}
-                              className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white"
+                              className="p-1 rounded-lg hover:bg-white/15 text-zinc-300 hover:text-white transition-colors"
                             >
                               <ArrowLeft className="w-4 h-4" />
                             </button>
                           )}
-                          <span className="text-xs font-black tracking-wider uppercase text-zinc-200">
+                          <span className="text-xs font-black tracking-wider uppercase text-zinc-100 font-heading">
                             {settingsTab === 'main' && 'Playback Settings'}
                             {settingsTab === 'quality' && 'Video Quality'}
                             {settingsTab === 'audio' && 'Audio Language'}
@@ -836,93 +1009,88 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                         
                         <button
                           onClick={() => setShowSettingsModal(false)}
-                          className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                          className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/15 transition-colors"
                         >
                           <X className="w-4 h-4" />
                         </button>
                       </div>
 
-                      {/* Main Settings Menu */}
+                      {/* Main Settings Menu (Single Layer Clean Layout) */}
                       {settingsTab === 'main' && (
-                        <div className="flex flex-col gap-1">
+                        <div className="divide-y divide-white/[0.08]">
                           {/* Quality */}
                           <button
                             onClick={() => setSettingsTab('quality')}
-                            className="w-full px-3 py-2.5 rounded-xl hover:bg-zinc-900 flex items-center justify-between transition-colors group"
+                            className="w-full px-3 py-3 rounded-xl hover:bg-white/15 flex items-center justify-between transition-all group active:scale-[0.99]"
                           >
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-1.5 rounded-lg bg-red-600/10 text-red-500 group-hover:bg-red-600 group-hover:text-white transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 rounded-xl bg-red-500/20 text-red-400 group-hover:bg-red-600 group-hover:text-white transition-colors shadow-sm">
                                 <Settings className="w-4 h-4" />
                               </div>
-                              <span className="text-xs font-bold text-zinc-200">Quality</span>
+                              <span className="text-xs font-extrabold text-zinc-100">Quality</span>
                             </div>
-                            <div className="flex items-center gap-1 text-xs font-extrabold text-zinc-400">
-                              <span>{currentQuality || '1080p'}</span>
-                              <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+                            <div className="flex items-center gap-1.5 text-xs font-extrabold text-zinc-300">
+                              <span className="truncate max-w-[110px] text-[11px] font-mono">{currentQuality || '1080p'}</span>
+                              <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
                             </div>
                           </button>
 
                           {/* Audio Track */}
                           <button
                             onClick={() => setSettingsTab('audio')}
-                            className="w-full px-3 py-2.5 rounded-xl hover:bg-zinc-900 flex items-center justify-between transition-colors group"
+                            className="w-full px-3 py-3 rounded-xl hover:bg-white/15 flex items-center justify-between transition-all group active:scale-[0.99]"
                           >
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 group-hover:bg-cyan-500 group-hover:text-white transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-300 group-hover:bg-cyan-500 group-hover:text-white transition-colors shadow-sm">
                                 <Languages className="w-4 h-4" />
                               </div>
-                              <span className="text-xs font-bold text-zinc-200">Audio Track</span>
+                              <span className="text-xs font-extrabold text-zinc-100">Audio Track</span>
                             </div>
-                            <div className="flex items-center gap-1 text-xs font-extrabold text-zinc-400">
-                              <span className="truncate max-w-[90px]">{currentAudio}</span>
-                              <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+                            <div className="flex items-center gap-1.5 text-xs font-extrabold text-zinc-300">
+                              <span className="truncate max-w-[100px] text-[11px] font-mono">{currentAudio}</span>
+                              <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
                             </div>
                           </button>
 
                           {/* Subtitles */}
                           <button
                             onClick={() => setSettingsTab('subtitles')}
-                            className="w-full px-3 py-2.5 rounded-xl hover:bg-zinc-900 flex items-center justify-between transition-colors group"
+                            className="w-full px-3 py-3 rounded-xl hover:bg-white/15 flex items-center justify-between transition-all group active:scale-[0.99]"
                           >
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-300 group-hover:bg-emerald-500 group-hover:text-white transition-colors shadow-sm">
                                 <Captions className="w-4 h-4" />
                               </div>
-                              <span className="text-xs font-bold text-zinc-200">Subtitles</span>
+                              <span className="text-xs font-extrabold text-zinc-100">Subtitles</span>
                             </div>
-                            <div className="flex items-center gap-1 text-xs font-extrabold text-zinc-400">
-                              <span>{subtitleTracks.find(s => s.id === currentSubtitle)?.label || 'Off'}</span>
-                              <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+                            <div className="flex items-center gap-1.5 text-xs font-extrabold text-zinc-300">
+                              <span className="text-[11px]">{subtitleTracks.find(s => s.id === currentSubtitle)?.label || 'Off'}</span>
+                              <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
                             </div>
                           </button>
 
                           {/* Speed */}
                           <button
                             onClick={() => setSettingsTab('speed')}
-                            className="w-full px-3 py-2.5 rounded-xl hover:bg-zinc-900 flex items-center justify-between transition-colors group"
+                            className="w-full px-3 py-3 rounded-xl hover:bg-white/15 flex items-center justify-between transition-all group active:scale-[0.99]"
                           >
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 group-hover:bg-amber-500 group-hover:text-white transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300 group-hover:bg-amber-500 group-hover:text-white transition-colors shadow-sm">
                                 <Gauge className="w-4 h-4" />
                               </div>
-                              <span className="text-xs font-bold text-zinc-200">Speed</span>
+                              <span className="text-xs font-extrabold text-zinc-100">Speed</span>
                             </div>
-                            <div className="flex items-center gap-1 text-xs font-extrabold text-zinc-400">
-                              <span>{playbackSpeed}x</span>
-                              <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+                            <div className="flex items-center gap-1.5 text-xs font-extrabold text-zinc-300">
+                              <span className="text-[11px] font-mono">{playbackSpeed}x</span>
+                              <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
                             </div>
                           </button>
-
-                          {/* External Player Menu Integration */}
-                          <div className="pt-2 border-t border-zinc-800">
-                            <ExternalPlayerMenu streamUrl={activeVideoUrl} movieTitle={movieTitle} />
-                          </div>
                         </div>
                       )}
 
                       {/* Quality Submenu */}
                       {settingsTab === 'quality' && (
-                        <div className="flex flex-col gap-1 max-h-56 overflow-y-auto">
+                        <div className="flex flex-col gap-1 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
                           {sources.map((s, idx) => (
                             <button
                               key={idx}
@@ -930,15 +1098,17 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                                 handleQualityChange(s);
                                 setShowSettingsModal(false);
                               }}
-                              className={`w-full px-3 py-2 rounded-xl text-xs font-extrabold flex items-center justify-between transition-all ${
-                                currentQuality === s.quality ? 'bg-red-600 text-white' : 'text-zinc-300 hover:bg-zinc-900'
+                              className={`w-full px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-between transition-all active:scale-[0.98] ${
+                                currentQuality === s.quality
+                                  ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-red-600/30'
+                                  : 'text-zinc-200 hover:bg-white/15'
                               }`}
                             >
                               <div className="flex items-center gap-2">
                                 <span>{s.quality || '1080p'}</span>
                                 {currentQuality === s.quality && <Check className="w-3.5 h-3.5" />}
                               </div>
-                              <span className="text-[10px] font-mono text-zinc-400">{s.file_size || 'HD'}</span>
+                              <span className="text-[10px] font-mono opacity-80">{s.file_size || 'HD'}</span>
                             </button>
                           ))}
                         </div>
@@ -946,7 +1116,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
 
                       {/* Audio Submenu */}
                       {settingsTab === 'audio' && (
-                        <div className="flex flex-col gap-1 max-h-56 overflow-y-auto">
+                        <div className="flex flex-col gap-1 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
                           {audioTracks.map((lang, idx) => (
                             <button
                               key={idx}
@@ -954,8 +1124,10 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                                 handleAudioChange(lang);
                                 setShowSettingsModal(false);
                               }}
-                              className={`w-full px-3 py-2 rounded-xl text-xs font-extrabold flex items-center justify-between transition-all ${
-                                currentAudio === lang ? 'bg-cyan-600 text-white' : 'text-zinc-300 hover:bg-zinc-900'
+                              className={`w-full px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-between transition-all active:scale-[0.98] ${
+                                currentAudio === lang
+                                  ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md shadow-cyan-600/30'
+                                  : 'text-zinc-200 hover:bg-white/15'
                               }`}
                             >
                               <span>{lang}</span>
@@ -967,7 +1139,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
 
                       {/* Subtitles Submenu */}
                       {settingsTab === 'subtitles' && (
-                        <div className="flex flex-col gap-1 max-h-56 overflow-y-auto">
+                        <div className="flex flex-col gap-1 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
                           {subtitleTracks.map((sub) => (
                             <button
                               key={sub.id}
@@ -975,8 +1147,10 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                                 handleSubtitleChange(sub);
                                 setShowSettingsModal(false);
                               }}
-                              className={`w-full px-3 py-2 rounded-xl text-xs font-extrabold flex items-center justify-between transition-all ${
-                                currentSubtitle === sub.id ? 'bg-emerald-600 text-white' : 'text-zinc-300 hover:bg-zinc-900'
+                              className={`w-full px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-between transition-all active:scale-[0.98] ${
+                                currentSubtitle === sub.id
+                                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
+                                  : 'text-zinc-200 hover:bg-white/15'
                               }`}
                             >
                               <span>{sub.label}</span>
@@ -988,7 +1162,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
 
                       {/* Speed Submenu */}
                       {settingsTab === 'speed' && (
-                        <div className="flex flex-col gap-1 max-h-56 overflow-y-auto">
+                        <div className="flex flex-col gap-1 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
                           {speeds.map((s) => (
                             <button
                               key={s}
@@ -996,8 +1170,10 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                                 handleSpeedChange(s);
                                 setShowSettingsModal(false);
                               }}
-                              className={`w-full px-3 py-2 rounded-xl text-xs font-extrabold flex items-center justify-between transition-all ${
-                                playbackSpeed === s ? 'bg-amber-500 text-white' : 'text-zinc-300 hover:bg-zinc-900'
+                              className={`w-full px-3 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-between transition-all active:scale-[0.98] ${
+                                playbackSpeed === s
+                                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/30'
+                                  : 'text-zinc-200 hover:bg-white/15'
                               }`}
                             >
                               <span>{s}x</span>
@@ -1184,12 +1360,16 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
               }, 500);
             }}
             onWaiting={() => {
-              playStartTimeRef.current = null;
-              setLoading(true);
+              if (videoRef.current && !videoRef.current.paused) {
+                playStartTimeRef.current = null;
+                setLoading(true);
+              }
             }}
             onStalled={() => {
-              playStartTimeRef.current = null;
-              setLoading(true);
+              if (videoRef.current && !videoRef.current.paused) {
+                playStartTimeRef.current = null;
+                setLoading(true);
+              }
             }}
             onSeeking={() => {
               playStartTimeRef.current = null;
@@ -1200,8 +1380,18 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
                 checkAndDismissLoading(videoRef.current);
               }
             }}
-            onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
+            onPlay={() => {
+              setIsPlaying(true);
+              if (videoRef.current) {
+                checkAndDismissLoading(videoRef.current);
+              }
+            }}
+            onPause={() => {
+              setIsPlaying(false);
+              if (videoRef.current) {
+                checkAndDismissLoading(videoRef.current);
+              }
+            }}
             onError={handleVideoError}
             onEnded={() => setIsPlaying(false)}
           >

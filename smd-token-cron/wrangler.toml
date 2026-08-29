@@ -1,0 +1,10 @@
+name = "smd-token-cron"
+main = "index.js"
+compatibility_date = "2026-08-20"
+
+[triggers]
+crons = ["*/45 * * * *"]
+
+[[kv_namespaces]]
+binding = "SA_TOKENS"
+id = "50dd4f06688c48bc8afeb50cdb68ee9b"

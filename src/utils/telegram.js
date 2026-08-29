@@ -6,16 +6,21 @@ import WebApp from '@twa-dev/sdk';
  */
 export function initTelegramApp() {
   try {
-    if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
-      WebApp.ready();
-      WebApp.expand();
+    if (typeof window !== 'undefined' && (window.Telegram?.WebApp || WebApp)) {
+      const tg = window.Telegram?.WebApp || WebApp;
+      if (typeof tg.ready === 'function') {
+        tg.ready();
+      }
+      if (typeof tg.expand === 'function') {
+        tg.expand();
+      }
       
       // Enable background color matching
-      if (WebApp.setHeaderColor) {
-        WebApp.setHeaderColor('#ffffff');
+      if (typeof tg.setHeaderColor === 'function') {
+        tg.setHeaderColor('#0c0f18');
       }
-      if (WebApp.setBackgroundColor) {
-        WebApp.setBackgroundColor('#f8fafc');
+      if (typeof tg.setBackgroundColor === 'function') {
+        tg.setBackgroundColor('#0c0f18');
       }
     }
   } catch (e) {

@@ -1,9 +1,9 @@
 import React from 'react';
-import { Play, Info, Star, Clock, Sparkles } from 'lucide-react';
+import { Play, Info, Star, Clock, Sparkles, Download } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { triggerHaptic } from '../utils/telegram';
 
-export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode }) {
+export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode, streamingMode = 'both' }) {
   if (!movie) return null;
 
   const handlePlayClick = () => {
@@ -109,13 +109,26 @@ export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode }) {
           transition={{ duration: 0.5, delay: 0.25 }}
           className="flex items-center gap-3"
         >
-          {/* Play Stream Button */}
+          {/* Play Stream vs Download Button */}
           <button
             onClick={handlePlayClick}
-            className="flex-1 sm:flex-initial px-6 py-3 rounded-2xl bg-gradient-to-r from-red-600 via-red-500 to-rose-600 hover:brightness-110 active:scale-95 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl shadow-red-600/40 border border-red-400/40 transition-all duration-200"
+            className={`flex-1 sm:flex-initial px-6 py-3 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl border transition-all duration-200 active:scale-95 ${
+              streamingMode === 'download_only'
+                ? 'bg-gradient-to-r from-amber-600 via-amber-500 to-orange-600 hover:brightness-110 text-white shadow-amber-600/40 border-amber-400/40'
+                : 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 hover:brightness-110 text-white shadow-red-600/40 border-red-400/40'
+            }`}
           >
-            <Play className="w-4 h-4 fill-current ml-0.5" />
-            <span>Play Now</span>
+            {streamingMode === 'download_only' ? (
+              <>
+                <Download className="w-4 h-4" />
+                <span>Download Only</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 fill-current ml-0.5" />
+                <span>Play Now</span>
+              </>
+            )}
           </button>
 
           {/* Details Button */}

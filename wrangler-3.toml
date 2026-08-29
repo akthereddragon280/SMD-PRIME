@@ -6,3 +6,6 @@ compatibility_date = "2026-08-20"
 GOOGLE_DRIVE_FOLDER_ID = "13QLJomTi-5IA4Jjz7TOMSEKwalE6mSCt"
 SUPABASE_URL = "https://iwulcblngplsjtsipods.supabase.co"
 
+[[kv_namespaces]]
+binding = "SA_TOKENS"
+id = "50dd4f06688c48bc8afeb50cdb68ee9b"
