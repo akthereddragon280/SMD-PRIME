@@ -105,15 +105,8 @@ jobs:
 
       - name: 🚀 Deploy Cloudflare Worker Node (${{ matrix.name }})
         env:
-          CF_API_TOKEN_1: ${{ secrets.CF_API_TOKEN_1 }}
-          CF_API_TOKEN_2: ${{ secrets.CF_API_TOKEN_2 }}
-          CF_API_TOKEN_3: ${{ secrets.CF_API_TOKEN_3 }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT_ID_1: ${{ secrets.CF_ACCOUNT_ID_1 }}
-          CF_ACCOUNT_ID_2: ${{ secrets.CF_ACCOUNT_ID_2 }}
-          CF_ACCOUNT_ID_3: ${{ secrets.CF_ACCOUNT_ID_3 }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          NODE_KEY: ${{ matrix.node_key }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CF_API_TOKEN_1 }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || secrets.CF_ACCOUNT_ID_1 }}
           STREAM_SECRET: ${{ secrets.STREAM_SECRET }}
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -123,17 +116,6 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
         run: |
-          if [ "$NODE_KEY" = "node2" ] && [ -n "$CF_API_TOKEN_2" ]; then
-            export CLOUDFLARE_API_TOKEN="$CF_API_TOKEN_2"
-            export CLOUDFLARE_ACCOUNT_ID="${CF_ACCOUNT_ID_2:-$CLOUDFLARE_ACCOUNT_ID}"
-          elif [ "$NODE_KEY" = "node3" ] && [ -n "$CF_API_TOKEN_3" ]; then
-            export CLOUDFLARE_API_TOKEN="$CF_API_TOKEN_3"
-            export CLOUDFLARE_ACCOUNT_ID="${CF_ACCOUNT_ID_3:-$CLOUDFLARE_ACCOUNT_ID}"
-          else
-            export CLOUDFLARE_API_TOKEN="${CF_API_TOKEN_1:-$CLOUDFLARE_API_TOKEN}"
-            export CLOUDFLARE_ACCOUNT_ID="${CF_ACCOUNT_ID_1:-$CLOUDFLARE_ACCOUNT_ID}"
-          fi
-
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
             echo "⚠️ Cloudflare API Token missing for ${{ matrix.name }}. Skipping deployment."
             exit 0
