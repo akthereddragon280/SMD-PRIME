@@ -670,21 +670,24 @@ export const DEFAULT_ROLE_POLICIES = {
     download_access: false,
     external_player: false,
     sa_mesh_priority: 'Standard',
-    parallel_streams: 1
+    parallel_streams: 1,
+    enable_ads: true
   },
   premium: {
     max_resolution: '4K',
     download_access: true,
     external_player: true,
     sa_mesh_priority: 'Turbo',
-    parallel_streams: 3
+    parallel_streams: 3,
+    enable_ads: false
   },
   admin: {
     max_resolution: '4K',
     download_access: true,
     external_player: true,
     sa_mesh_priority: 'VIP',
-    parallel_streams: 999
+    parallel_streams: 999,
+    enable_ads: false
   }
 };
 

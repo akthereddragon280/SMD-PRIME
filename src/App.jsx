@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching, getCachedMovies, getGlobalStreamingMode, sortMoviesWithPosterPriority } from './supabaseClient';
+import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching, getCachedMovies, getGlobalStreamingMode, sortMoviesWithPosterPriority, getRolePolicies, getUserEntitlements } from './supabaseClient';
 import Header from './components/Header';
 import HeroBanner from './components/HeroBanner';
 import MovieRow from './components/MovieRow';
@@ -10,6 +10,7 @@ import AdminModal from './components/AdminModal';
 import PlayerGateway from './components/PlayerGateway';
 import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
 import { useNavigationHistory } from './utils/useNavigationHistory';
+import { syncAdEngine } from './utils/adEngine';
 import { Loader2, Film, History, Flame, Zap, Compass, Clapperboard } from 'lucide-react';
 
 export default function App() {
@@ -210,6 +211,34 @@ export default function App() {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('smd_streaming_mode_changed', handleStorageChange);
       document.removeEventListener('smd_streaming_mode_changed', handleStorageChange);
+    };
+  }, []);
+
+  // Synchronize Adsterra Ad Engine with dynamic Role Policies
+  useEffect(() => {
+    const syncAdsForCurrentUser = async () => {
+      const tgUser = getTelegramUserInfo();
+      const userRole = tgUser?.role || 'normal';
+      const policies = await getRolePolicies();
+      const entitlements = getUserEntitlements(userRole, policies);
+      syncAdEngine(entitlements.enable_ads);
+    };
+
+    syncAdsForCurrentUser();
+
+    const handlePolicyChange = (e) => {
+      const tgUser = getTelegramUserInfo();
+      const userRole = tgUser?.role || 'normal';
+      const policies = e?.detail || {};
+      const entitlements = getUserEntitlements(userRole, policies);
+      syncAdEngine(entitlements.enable_ads);
+    };
+
+    window.addEventListener('smd_role_policies_changed', handlePolicyChange);
+    document.addEventListener('smd_role_policies_changed', handlePolicyChange);
+    return () => {
+      window.removeEventListener('smd_role_policies_changed', handlePolicyChange);
+      document.removeEventListener('smd_role_policies_changed', handlePolicyChange);
     };
   }, []);
 

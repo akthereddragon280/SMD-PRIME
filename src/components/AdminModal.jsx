@@ -1075,6 +1075,31 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                           </button>
                         </div>
 
+                        {/* Adsterra Popunder Ad Engine Toggle */}
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/80 border border-white/5">
+                          <div>
+                            <span className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                              <span>Adsterra Ads Engine</span>
+                              <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
+                                policy.enable_ads !== false ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              }`}>
+                                {policy.enable_ads !== false ? '📢 ACTIVE' : '🚫 AD-FREE'}
+                              </span>
+                            </span>
+                            <span className="text-[10px] text-zinc-500 block">Inject Popunder Ad Script for this Role</span>
+                          </div>
+                          <button
+                            onClick={() => handleTogglePolicy('enable_ads', policy.enable_ads === false ? true : false)}
+                            className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                              policy.enable_ads !== false ? 'bg-red-600' : 'bg-zinc-700'
+                            }`}
+                          >
+                            <span className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                              policy.enable_ads !== false ? 'translate-x-5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
                         {/* Mesh Priority & Parallel Streams Info */}
                         <div className="p-3 rounded-xl bg-zinc-950/90 border border-white/5 text-[11px] font-mono space-y-1">
                           <div className="flex items-center justify-between text-zinc-400">
