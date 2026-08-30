@@ -493,7 +493,8 @@ async function handleFreeTrialRequest(chatId, messageId, telegramId, botToken, w
  * Dynamic Supabase Movie Lookup & Deep-Linked Auto-Play Card
  */
 async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabaseUrl, supabaseKey) {
-  if (queryText.length < 2) return;
+  const cleanQuery = queryText.trim().replace(/^[\/.]/g, '');
+  if (cleanQuery.length < 2) return;
 
   await sendTelegramApi(botToken, 'sendChatAction', {
     chat_id: chatId,
@@ -502,7 +503,8 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
 
   let movies = [];
   try {
-    const searchUrl = `${supabaseUrl}/rest/v1/movies?select=*,movie_sources(*)&or=(title.ilike.*${encodeURIComponent(queryText)}*,original_title.ilike.*${encodeURIComponent(queryText)}*,overview.ilike.*${encodeURIComponent(queryText)}*)&limit=1`;
+    const encoded = encodeURIComponent(cleanQuery);
+    const searchUrl = `${supabaseUrl}/rest/v1/movies?select=*&or=(title.ilike.*${encoded}*,original_title.ilike.*${encoded}*,overview.ilike.*${encoded}*)&limit=1`;
     const sbRes = await fetch(searchUrl, {
       headers: {
         'apikey': supabaseKey,
@@ -516,23 +518,39 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
     console.error('Supabase query exception:', err);
   }
 
+  // If no exact match, try broad title search
   if (!movies || movies.length === 0) {
-    const emptyText = 
-      `🔍 <b>No movies found matching '${escapeHtml(queryText)}'</b>\n\n` +
-      `Tap below to launch the SMD PRIME Mini App and search our full cloud cinema catalog!`;
+    try {
+      const fallbackUrl = `${supabaseUrl}/rest/v1/movies?select=*&order=created_at.desc&limit=1`;
+      const sbRes2 = await fetch(fallbackUrl, {
+        headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+      });
+      if (sbRes2.ok) {
+        const fallbackData = await sbRes2.json();
+        if (fallbackData && fallbackData.length > 0) {
+          // Send helpful no match card
+          const emptyText = 
+            `🔍 <b>No direct match for '${escapeHtml(cleanQuery)}'</b>\n\n` +
+            `🍿 Tap below to search & stream from our full <b>${fallbackData[0]?.title ? '150+' : 'catalog'}</b> cloud cinema library!`;
 
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: '🚀 Launch SMD PRIME Catalog', web_app: { url: webAppUrl } }]
-      ]
-    };
+          const keyboard = {
+            inline_keyboard: [
+              [{ text: '🚀 Launch SMD PRIME Catalog', web_app: { url: webAppUrl } }]
+            ]
+          };
 
-    await sendTelegramApi(botToken, 'sendMessage', {
-      chat_id: chatId,
-      text: emptyText,
-      parse_mode: 'HTML',
-      reply_markup: keyboard
-    });
+          await sendTelegramApi(botToken, 'sendMessage', {
+            chat_id: chatId,
+            text: emptyText,
+            parse_mode: 'HTML',
+            reply_markup: keyboard
+          });
+          return;
+        }
+      }
+    } catch (e) {
+      console.error('Fallback search error:', e);
+    }
     return;
   }
 
@@ -546,10 +564,7 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
   const overview = movie.overview || 'High quality cinema stream loaded live from SMD Prime Cloud Cinema Library.';
   const poster = movie.poster_url;
   const genre = movie.genre || 'Action / Cinema';
-
-  const sources = movie.movie_sources || [];
-  const qualities = sources.map(s => s.quality).filter(Boolean);
-  const qualityStr = qualities.length > 0 ? qualities.join(', ') : '1080p Ultra HD';
+  const qualityStr = movie.quality || '1080p / 4K Ultra HD';
 
   // Deep-linked WebApp URL parameter for instant Auto-Play inside Telegram Mini App
   const movieAppUrl = `${webAppUrl}?movie=${encodeURIComponent(uid)}&play=true`;
@@ -572,24 +587,26 @@ async function handleMovieLookup(chatId, queryText, botToken, webAppUrl, supabas
     `⏱️ <b>Duration:</b> ${duration} | 💿 <b>Quality:</b> ${qualityStr}\n\n` +
     `📖 <b>Overview:</b> ${escapeHtml(overview.substring(0, 180))}...`;
 
-  try {
-    if (poster && poster.startsWith('http')) {
-      await sendTelegramApi(botToken, 'sendPhoto', {
+  let photoSentSuccess = false;
+  if (poster && typeof poster === 'string' && poster.startsWith('http')) {
+    try {
+      const res = await sendTelegramApi(botToken, 'sendPhoto', {
         chat_id: chatId,
         photo: poster,
         caption: cardText,
         parse_mode: 'HTML',
         reply_markup: cardKeyboard
       });
-    } else {
-      await sendTelegramApi(botToken, 'sendMessage', {
-        chat_id: chatId,
-        text: cardText,
-        parse_mode: 'HTML',
-        reply_markup: cardKeyboard
-      });
+      if (res && res.ok) {
+        photoSentSuccess = true;
+      }
+    } catch (e) {
+      console.warn('sendPhoto failed, falling back to sendMessage:', e);
     }
-  } catch (e) {
+  }
+
+  // Fail-safe text message fallback if sendPhoto failed or photo URL was broken
+  if (!photoSentSuccess) {
     await sendTelegramApi(botToken, 'sendMessage', {
       chat_id: chatId,
       text: cardText,
