@@ -11,6 +11,7 @@ import PlayerGateway from './components/PlayerGateway';
 import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
 import { useNavigationHistory } from './utils/useNavigationHistory';
 import { syncAdEngine } from './utils/adEngine';
+import { getAdminUserIds } from './utils/admin';
 import { Loader2, Film, History, Flame, Zap, Compass, Clapperboard } from 'lucide-react';
 
 export default function App() {
@@ -216,22 +217,36 @@ export default function App() {
 
   // Synchronize Adsterra Ad Engine with dynamic Role Policies
   useEffect(() => {
-    const syncAdsForCurrentUser = async () => {
+    const resolveUserRole = () => {
       const tgUser = getTelegramUserInfo();
-      const userRole = tgUser?.role || 'normal';
+      const adminIds = getAdminUserIds();
+      const isHashAdmin = typeof window !== 'undefined' && window.location.hash.includes('admin');
+      
+      const tgUserIdNum = tgUser?.id ? Number(tgUser.id) : 0;
+      if (isAdminOpen || isHashAdmin || (tgUserIdNum > 0 && adminIds.includes(tgUserIdNum))) {
+        return 'admin';
+      }
+      return tgUser?.role || 'normal';
+    };
+
+    const syncAdsForCurrentUser = async () => {
+      const userRole = resolveUserRole();
       const policies = await getRolePolicies();
       const entitlements = getUserEntitlements(userRole, policies);
-      syncAdEngine(entitlements.enable_ads);
+
+      // HARD GUARD: If userRole is admin, force enable_ads to false 1000%!
+      const shouldEnable = userRole === 'admin' ? false : (entitlements.enable_ads !== false);
+      syncAdEngine(shouldEnable);
     };
 
     syncAdsForCurrentUser();
 
     const handlePolicyChange = (e) => {
-      const tgUser = getTelegramUserInfo();
-      const userRole = tgUser?.role || 'normal';
+      const userRole = resolveUserRole();
       const policies = e?.detail || {};
       const entitlements = getUserEntitlements(userRole, policies);
-      syncAdEngine(entitlements.enable_ads);
+      const shouldEnable = userRole === 'admin' ? false : (entitlements.enable_ads !== false);
+      syncAdEngine(shouldEnable);
     };
 
     window.addEventListener('smd_role_policies_changed', handlePolicyChange);
@@ -240,7 +255,7 @@ export default function App() {
       window.removeEventListener('smd_role_policies_changed', handlePolicyChange);
       document.removeEventListener('smd_role_policies_changed', handlePolicyChange);
     };
-  }, []);
+  }, [isAdminOpen]);
 
   // Filter movies strictly from Google Drive synced list
   const heroMovie = moviesList.length > 0 ? (moviesList.find((m) => m.isHero) || moviesList[0]) : null;

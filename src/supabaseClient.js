@@ -694,9 +694,29 @@ export const DEFAULT_ROLE_POLICIES = {
 const CACHE_KEY_ROLE_POLICIES = 'smd_prime_role_policies';
 
 /**
- * Fetch dynamic Role Policies from LocalStorage cache or Supabase DB
+ * Fetch dynamic Role Policies from Supabase DB or LocalStorage cache
  */
 export async function getRolePolicies() {
+  try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'role_policies')
+      .limit(1)
+      .maybeSingle();
+
+    if (data && data.value) {
+      const dbPolicies = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+      const merged = { ...DEFAULT_ROLE_POLICIES, ...dbPolicies };
+      try {
+        localStorage.setItem(CACHE_KEY_ROLE_POLICIES, JSON.stringify(merged));
+      } catch (e) {}
+      return merged;
+    }
+  } catch (e) {
+    console.warn('DB getRolePolicies note:', e);
+  }
+
   try {
     const cached = localStorage.getItem(CACHE_KEY_ROLE_POLICIES);
     if (cached) {
@@ -705,26 +725,11 @@ export async function getRolePolicies() {
     }
   } catch (e) {}
 
-  try {
-    const { data, error } = await supabase
-      .from('system_settings')
-      .select('value')
-      .eq('key', 'role_policies')
-      .maybeSingle();
-
-    if (data && data.value) {
-      const dbPolicies = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-      const merged = { ...DEFAULT_ROLE_POLICIES, ...dbPolicies };
-      localStorage.setItem(CACHE_KEY_ROLE_POLICIES, JSON.stringify(merged));
-      return merged;
-    }
-  } catch (e) {}
-
   return DEFAULT_ROLE_POLICIES;
 }
 
 /**
- * Save updated Role Policies to LocalStorage & Supabase DB
+ * Save updated Role Policies to Supabase DB & LocalStorage
  */
 export async function setRolePolicies(newPolicies) {
   const merged = { ...DEFAULT_ROLE_POLICIES, ...newPolicies };
@@ -737,13 +742,30 @@ export async function setRolePolicies(newPolicies) {
   document.dispatchEvent(evt);
 
   try {
-    await supabase
+    const payload = { 
+      key: 'role_policies', 
+      value: JSON.stringify(merged), 
+      updated_at: new Date().toISOString() 
+    };
+
+    const { error } = await supabase
       .from('system_settings')
-      .upsert({ 
-        key: 'role_policies', 
-        value: JSON.stringify(merged), 
-        updated_at: new Date().toISOString() 
-      }, { onConflict: 'key' });
+      .upsert(payload, { onConflict: 'key' });
+
+    if (error) {
+      const { data: existing } = await supabase
+        .from('system_settings')
+        .select('id')
+        .eq('key', 'role_policies')
+        .limit(1)
+        .maybeSingle();
+
+      if (existing && existing.id) {
+        await supabase.from('system_settings').update(payload).eq('id', existing.id);
+      } else {
+        await supabase.from('system_settings').insert(payload);
+      }
+    }
   } catch (e) {
     console.warn('Role policies upsert note:', e);
   }
@@ -752,11 +774,21 @@ export async function setRolePolicies(newPolicies) {
 
 /**
  * Get user entitlements for a given user role
+ * HARD RULE: Admin role ALWAYS gets 1000% NO ADS!
  */
 export function getUserEntitlements(userRole = 'normal', activePolicies = null) {
   const policies = activePolicies || DEFAULT_ROLE_POLICIES;
   const role = (userRole || 'normal').toLowerCase();
-  return policies[role] || policies.normal || DEFAULT_ROLE_POLICIES.normal;
+  
+  const basePolicy = policies[role] || policies.normal || DEFAULT_ROLE_POLICIES.normal;
+  const entitlement = { ...basePolicy };
+
+  // ABSOLUTE HARD RULE: Admin users MUST NEVER EVER receive ads!
+  if (role === 'admin') {
+    entitlement.enable_ads = false;
+  }
+
+  return entitlement;
 }
 
 /**
@@ -779,55 +811,45 @@ export async function fetchAllTelegramUsersFromSupabase() {
 
 /**
  * Update a user's role (normal, premium, admin) in Supabase DB
- * Performs fail-safe upsert across both 'users' and 'telegram_users' tables
+ * Performs fail-safe upsert matching exact Supabase 'users' table schema (id, telegram_user_id, role)
  */
 export async function updateUserRoleInSupabase(telegramId, newRole) {
   try {
     if (!telegramId) return { success: false, error: 'Missing telegramId' };
     const role = (newRole || 'normal').toLowerCase();
     const idNum = Number(telegramId) || 0;
-    const idStr = String(telegramId);
-    const targetId = idNum || idStr;
+    const targetId = idNum || Number(telegramId);
 
-    const payload = {
-      telegram_user_id: targetId,
-      role: role,
-      updated_at: new Date().toISOString()
-    };
+    // 1. Primary: Update 'users' table (Only valid columns: telegram_user_id, role)
+    const { data: usersData, error: err1 } = await supabase
+      .from('users')
+      .update({ role: role })
+      .eq('telegram_user_id', targetId)
+      .select();
 
-    // 1. Primary: Update or Upsert 'users' table
-    try {
-      const { error: err1 } = await supabase
+    if (err1 || !usersData || usersData.length === 0) {
+      // Fallback upsert without extra columns like updated_at
+      await supabase
         .from('users')
-        .upsert(payload, { onConflict: 'telegram_user_id' });
-
-      if (err1) {
-        // Fallback update by telegram_user_id
-        await supabase
-          .from('users')
-          .update({ role: role, updated_at: new Date().toISOString() })
-          .eq('telegram_user_id', targetId);
-      }
-    } catch (e1) {
-      console.warn('users table role update note:', e1);
+        .upsert({ telegram_user_id: targetId, role: role }, { onConflict: 'telegram_user_id' });
     }
 
-    // 2. Secondary: Update or Upsert 'telegram_users' table (for Telegram Bot sync)
+    // 2. Secondary: Update or Upsert 'telegram_users' table if present
     try {
       const { error: err2 } = await supabase
         .from('telegram_users')
-        .upsert({
-          telegram_user_id: targetId,
-          telegram_id: targetId,
-          role: role,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'telegram_user_id' });
+        .update({ role: role, updated_at: new Date().toISOString() })
+        .eq('telegram_user_id', targetId);
 
       if (err2) {
         await supabase
           .from('telegram_users')
-          .update({ role: role, updated_at: new Date().toISOString() })
-          .eq('telegram_user_id', targetId);
+          .upsert({
+            telegram_user_id: targetId,
+            telegram_id: targetId,
+            role: role,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'telegram_user_id' });
       }
     } catch (e2) {
       console.warn('telegram_users table role update note:', e2);

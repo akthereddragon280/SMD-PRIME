@@ -1,13 +1,29 @@
 import React from 'react';
 import { Play, Info, Star, Clock, Sparkles, Download } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { triggerHaptic } from '../utils/telegram';
+import { triggerHaptic, getTelegramUserInfo } from '../utils/telegram';
+import { triggerIntentionalAd } from '../utils/adEngine';
+import { getRolePolicies, getUserEntitlements } from '../supabaseClient';
 
 export default function HeroBanner({ movie, onPlay, onSelectMovie, darkMode, streamingMode = 'both' }) {
   if (!movie) return null;
 
-  const handlePlayClick = () => {
+  const handlePlayClick = async () => {
     triggerHaptic('heavy');
+
+    try {
+      const tgUser = getTelegramUserInfo();
+      const role = tgUser?.role || 'normal';
+      const policies = await getRolePolicies();
+      const entitlements = getUserEntitlements(role, policies);
+
+      triggerIntentionalAd({
+        userRole: role,
+        enableAds: entitlements.enable_ads,
+        actionType: streamingMode === 'download_only' ? 'download' : 'play'
+      });
+    } catch (e) {}
+
     onPlay(movie);
   };
 

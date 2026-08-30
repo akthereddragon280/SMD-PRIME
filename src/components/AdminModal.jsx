@@ -14,7 +14,8 @@ import { openExternalLink, triggerHaptic } from '../utils/telegram';
 import { registerNodesFromDiagnostics } from '../utils/loadBalancer';
 
 export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'analytics', 'users', 'role_policies', 'telemetry', 'watch_history'
+  const [activeTab, setActiveTab] = useState('dashboard_analytics'); // 'dashboard_analytics', 'access_policy', 'health_logs'
+  const [healthLogsSubTab, setHealthLogsSubTab] = useState('telemetry'); // 'telemetry' | 'watch_history'
   const [analyticsLogs, setAnalyticsLogs] = useState([]);
   const [watchLogs, setWatchLogs] = useState([]);
   const [registeredUsers, setRegisteredUsers] = useState([]);
@@ -355,7 +356,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
     setAnalyticsTypeFilter('all');
   };
 
-  // Filtered User List for RBAC User Management
+  // Filtered User List for RBAC User Management (Ordered: Super Admin -> Admin -> Premium -> Normal)
   const filteredUsers = useMemo(() => {
     const query = userSearchQuery.toLowerCase().trim();
     let list = registeredUsers;
@@ -369,20 +370,29 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
       });
     }
 
-    // Separate into Super Admins, Admins, and Members
+    // Categorize into Super Admins, Admins, Premium Members, and Normal Users
     const superAdmins = [];
     const admins = [];
-    const members = [];
+    const premiumUsers = [];
+    const normalUsers = [];
 
     list.forEach(u => {
       const isSuper = Number(u.telegram_user_id) === 0;
       const isAdmin = u.role === 'admin' || adminIds.includes(Number(u.telegram_user_id));
-      if (isSuper) superAdmins.push(u);
-      else if (isAdmin) admins.push(u);
-      else members.push(u);
+      const isPremium = u.role === 'premium';
+
+      if (isSuper) {
+        superAdmins.push(u);
+      } else if (isAdmin) {
+        admins.push(u);
+      } else if (isPremium) {
+        premiumUsers.push(u);
+      } else {
+        normalUsers.push(u);
+      }
     });
 
-    return [...superAdmins, ...admins, ...members];
+    return [...superAdmins, ...admins, ...premiumUsers, ...normalUsers];
   }, [registeredUsers, adminIds, userSearchQuery]);
 
   // Analytics Smart Filter Data
@@ -435,37 +445,30 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
       )}
 
       {/* Main Glassmorphism Command Center Window */}
-      <div className={`w-full h-full sm:max-w-5xl sm:h-[92vh] sm:rounded-3xl flex flex-col overflow-hidden border shadow-2xl transition-all ${
-        darkMode ? 'bg-[#080b13]/95 text-white border-zinc-800/90' : 'bg-white text-slate-900 border-slate-200'
-      }`}>
+      <div className="w-full h-full sm:max-w-5xl sm:h-[92vh] sm:rounded-3xl flex flex-col overflow-hidden border border-white/10 bg-[#07090e]/95 text-zinc-100 shadow-2xl backdrop-blur-2xl transition-all">
 
         {/* TOP COMMAND CENTER HEADER BAR */}
-        <div className={`px-5 py-4 border-b flex items-center justify-between shrink-0 ${
-          darkMode ? 'border-zinc-800/80 bg-gradient-to-r from-zinc-950 via-[#0a0d18] to-zinc-950' : 'border-slate-200 bg-slate-50'
-        }`}>
+        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between shrink-0 bg-gradient-to-r from-zinc-950 via-[#0a0d16] to-zinc-950">
           <div className="flex items-center gap-3.5">
-            <div className="relative group">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-red-600 via-rose-600 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-red-600/30">
-                <ShieldAlert className="w-6 h-6" />
-              </div>
-              <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 ring-2 ring-black animate-pulse"></div>
+            <div className="w-10 h-10 rounded-2xl bg-red-600/10 border border-red-500/20 text-red-500 flex items-center justify-center shrink-0">
+              <ShieldAlert className="w-5 h-5" />
             </div>
 
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-black text-lg tracking-tight font-heading">
-                  SMD PRIME OTT Command Center
+                <h3 className="font-extrabold text-base tracking-tight text-white font-heading">
+                  SMD PRIME Command Center
                 </h3>
-                <span className="px-2.5 py-0.5 text-[9px] font-black uppercase tracking-widest rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
-                  ENTERPRISE ADMIN
+                <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-md bg-white/5 text-zinc-400 border border-white/10">
+                  ENTERPRISE
                 </span>
               </div>
-              <p className="text-xs text-zinc-400 mt-1 flex items-center gap-2">
-                <span>Infrastructure Telemetry</span>
-                <span className="w-1 h-1 rounded-full bg-zinc-600"></span>
-                <span className="text-emerald-400 font-mono font-bold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  HEALTHY 200 OK
+              <p className="text-xs text-zinc-400 mt-0.5 flex items-center gap-2 font-mono">
+                <span>Telemetry</span>
+                <span className="w-1 h-1 rounded-full bg-zinc-700"></span>
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  200 OK
                 </span>
               </p>
             </div>
@@ -473,218 +476,632 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
 
           <button
             onClick={onClose}
-            className="p-2.5 rounded-full bg-zinc-900/90 hover:bg-red-600/20 text-zinc-400 hover:text-red-400 border border-white/10 transition-all active:scale-95"
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/10 transition-all active:scale-95"
             aria-label="Close"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* NAVIGATION TAB BAR */}
-        <div className={`px-5 py-3 border-b shrink-0 ${darkMode ? 'border-zinc-800/80 bg-black/40' : 'border-slate-200 bg-slate-100/60'}`}>
-          <div className="flex items-center gap-1.5 p-1.5 rounded-2xl border overflow-x-auto no-scrollbar bg-zinc-900/90 border-white/5">
+        {/* NAVIGATION TAB BAR - CONSOLIDATED 3 HUBS */}
+        <div className="px-6 py-2.5 border-b border-white/10 shrink-0 bg-black/40">
+          <div className="flex items-center gap-2 p-1 rounded-2xl border border-white/5 bg-zinc-950/80 overflow-x-auto no-scrollbar">
             <button
-              onClick={() => setActiveTab('overview')}
-              className={`flex-1 min-w-[90px] py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${
-                activeTab === 'overview' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'
+              onClick={() => setActiveTab('dashboard_analytics')}
+              className={`flex-1 min-w-[140px] py-2 px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                activeTab === 'dashboard_analytics' || activeTab === 'overview' || activeTab === 'analytics'
+                  ? 'bg-red-600 text-white shadow-md shadow-red-600/20 font-extrabold' 
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              <Activity className="w-4 h-4" />
-              <span>Overview</span>
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>📊 Dashboard & Analytics</span>
             </button>
 
             <button
-              onClick={() => setActiveTab('analytics')}
-              className={`flex-1 min-w-[110px] py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${
-                activeTab === 'analytics' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'
+              onClick={() => setActiveTab('access_policy')}
+              className={`flex-1 min-w-[140px] py-2 px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                activeTab === 'access_policy' || activeTab === 'role_policies' || activeTab === 'users'
+                  ? 'bg-red-600 text-white shadow-md shadow-red-600/20 font-extrabold' 
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              <BarChart3 className="w-4 h-4" />
-              <span>Analytics ({analyticsSummary.length})</span>
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>🛡️ Access & Policy</span>
             </button>
 
             <button
-              onClick={() => setActiveTab('users')}
-              className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${
-                activeTab === 'users' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'
+              onClick={() => setActiveTab('health_logs')}
+              className={`flex-1 min-w-[140px] py-2 px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                activeTab === 'health_logs' || activeTab === 'telemetry' || activeTab === 'watch_history'
+                  ? 'bg-red-600 text-white shadow-md shadow-red-600/20 font-extrabold' 
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              <Users className="w-4 h-4" />
-              <span>RBAC Users ({registeredUsers.length})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('role_policies')}
-              className={`flex-1 min-w-[110px] py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${
-                activeTab === 'role_policies' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Policy Matrix</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('telemetry')}
-              className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${
-                activeTab === 'telemetry' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              <Radio className="w-4 h-4" />
-              <span>Telemetry ({analyticsLogs.length})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('watch_history')}
-              className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${
-                activeTab === 'watch_history' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              <Eye className="w-4 h-4" />
-              <span>Logs ({watchLogs.length + downloadLogs.length})</span>
+              <Activity className="w-3.5 h-3.5" />
+              <span>📡 Health & Audit Logs</span>
             </button>
           </div>
         </div>
 
-        {/* DYNAMIC TAB CONTENT AREA */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-7 space-y-6 custom-scrollbar relative">
+        {/* DYNAMIC TAB CONTENT AREA - CONSOLIDATED 3 HUBS */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6 custom-scrollbar relative">
 
-          {/* 1. OVERVIEW & TELEMETRY */}
-          {activeTab === 'overview' && (
+          {/* HUB 1: 📊 DASHBOARD & ANALYTICS (Combines Overview + Analytics) */}
+          {(activeTab === 'dashboard_analytics' || activeTab === 'overview' || activeTab === 'analytics') && (
             <div className="space-y-6 animate-fadeIn">
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
-                <div className="p-5 rounded-2xl border bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border-white/10 hover:border-red-500/40 transition-all">
+              {/* Minimalist KPI Cards Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="p-4 rounded-2xl border border-white/5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-zinc-400">Total Movies</span>
-                    <Film className="w-4 h-4 text-red-500" />
+                    <span className="text-xs font-medium text-zinc-400">Total Movies</span>
+                    <Film className="w-3.5 h-3.5 text-red-400" />
                   </div>
-                  <div className="text-3xl font-black font-heading text-white">{totalMoviesCount}</div>
-                  <div className="text-[10px] text-emerald-400 font-bold mt-1.5 flex items-center gap-1 font-mono">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  <div className="text-2xl font-black font-heading text-white">{totalMoviesCount}</div>
+                  <div className="text-[10px] text-emerald-400 font-bold mt-1 flex items-center gap-1 font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                     <span>Drive Synced</span>
                   </div>
                 </div>
 
-                <div className="p-5 rounded-2xl border bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border-white/10 hover:border-emerald-500/40 transition-all">
+                <div className="p-4 rounded-2xl border border-white/5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-zinc-400">Supabase DB</span>
-                    <Database className="w-4 h-4 text-emerald-500" />
+                    <span className="text-xs font-medium text-zinc-400">Supabase DB</span>
+                    <Database className="w-3.5 h-3.5 text-emerald-400" />
                   </div>
-                  <div className="text-3xl font-black font-heading text-emerald-400 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-6 h-6" />
+                  <div className="text-2xl font-black font-heading text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-5 h-5" />
                     <span>Active</span>
                   </div>
-                  <div className="text-[10px] text-zinc-400 font-mono mt-1.5 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span>PostgreSQL 200 OK ({dbLatencyMs > 0 ? `${dbLatencyMs}ms` : '5ms'})</span>
+                  <div className="text-[10px] text-zinc-400 font-mono mt-1">
+                    PostgreSQL ({dbLatencyMs > 0 ? `${dbLatencyMs}ms` : '5ms'})
                   </div>
                 </div>
 
-                <div className="p-5 rounded-2xl border bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border-white/10 hover:border-amber-500/40 transition-all">
+                <div className="p-4 rounded-2xl border border-white/5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-zinc-400">Outbound GDrive API</span>
-                    <Activity className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-medium text-zinc-400">GDrive API</span>
+                    <Activity className="w-3.5 h-3.5 text-amber-400" />
                   </div>
-                  <div className="text-3xl font-black font-heading text-amber-400 font-mono">
+                  <div className="text-2xl font-black font-heading text-amber-400 font-mono">
                     {diagReport?.gdriveDailyStats?.request_count || gdriveRequestCountToday || '0'}
                   </div>
-                  <div className="text-[10px] text-amber-400 font-bold mt-1.5 flex items-center gap-1 font-mono">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-                    <span>Batched Daily Telemetry</span>
+                  <div className="text-[10px] text-amber-400/80 font-mono mt-1">
+                    Daily Telemetry
                   </div>
                 </div>
 
-                <div className="p-5 rounded-2xl border bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border-white/10 hover:border-cyan-500/40 transition-all">
+                <div className="p-4 rounded-2xl border border-white/5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-zinc-400">Worker Mesh</span>
-                    <Server className="w-4 h-4 text-cyan-400" />
+                    <span className="text-xs font-medium text-zinc-400">Worker Mesh</span>
+                    <Server className="w-3.5 h-3.5 text-cyan-400" />
                   </div>
-                  <div className="text-3xl font-black font-heading text-white">{activeSaCount} SAs</div>
-                  <div className="text-[10px] text-cyan-400 font-bold mt-1.5 flex items-center gap-1 font-mono">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                    <span>3 Nodes Load Balanced</span>
+                  <div className="text-2xl font-black font-heading text-white">{activeSaCount} SAs</div>
+                  <div className="text-[10px] text-cyan-400 font-mono mt-1">
+                    3 Nodes Balanced
                   </div>
                 </div>
 
-                <div className="p-5 rounded-2xl border bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border-white/10 hover:border-indigo-500/40 transition-all">
+                <div className="p-4 rounded-2xl border border-white/5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-zinc-400">Active Admins</span>
-                    <Users className="w-4 h-4 text-indigo-400" />
+                    <span className="text-xs font-medium text-zinc-400">Active Admins</span>
+                    <Users className="w-3.5 h-3.5 text-indigo-400" />
                   </div>
-                  <div className="text-3xl font-black font-heading text-white">{adminIds.length}</div>
-                  <div className="text-[10px] text-indigo-400 font-mono mt-1.5">{userCount} Registered Users</div>
+                  <div className="text-2xl font-black font-heading text-white">{adminIds.length}</div>
+                  <div className="text-[10px] text-zinc-400 font-mono mt-1">{userCount} Users</div>
                 </div>
               </div>
 
               {/* Global Streaming Mode Switcher Card */}
-              <div className="p-5 rounded-2xl border bg-gradient-to-r from-zinc-900 via-zinc-900/90 to-zinc-950 border-white/10 space-y-3 shadow-xl">
+              <div className="p-5 rounded-2xl border border-white/5 bg-zinc-900/30 space-y-3">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
-                    <Film className="w-4.5 h-4.5 text-red-500" />
-                    <h4 className="text-xs font-black uppercase tracking-wider text-zinc-200">
-                      Global OTT Delivery & Access Control Mode
+                    <Film className="w-4 h-4 text-red-500" />
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-zinc-200">
+                      Global OTT Access Control Mode
                     </h4>
                   </div>
-                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase border ${
                     streamingMode === 'both'
                       ? 'bg-red-500/10 text-red-400 border-red-500/20'
                       : streamingMode === 'download_only'
                         ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                         : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
                   }`}>
-                    Mode: {streamingMode.toUpperCase().replace('_', ' ')}
+                    {streamingMode.toUpperCase().replace('_', ' ')}
                   </span>
                 </div>
-                <p className="text-xs text-zinc-400 font-medium leading-relaxed">
-                  Control user stream permissions instantly across all devices. When set to <strong className="text-amber-400 font-bold">Download Only</strong>, in-app video streaming will be restricted and users will only be allowed to download files.
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Control stream & download access globally across all platforms.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                   <button
                     onClick={() => handleStreamingModeChange('both')}
-                    className={`py-3 px-3 rounded-xl text-xs font-extrabold flex flex-col items-center gap-1 transition-all border ${
+                    className={`py-2.5 px-3 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all border ${
                       streamingMode === 'both'
-                        ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white border-red-400/50 shadow-lg shadow-red-600/30'
-                        : 'bg-zinc-900/80 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white'
+                        ? 'bg-red-600 text-white border-red-500 shadow-md shadow-red-600/20 font-black'
+                        : 'bg-zinc-950/80 text-zinc-400 border-white/5 hover:bg-zinc-900 hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 font-black">
-                      <span>🎬</span>
-                      <span>Both</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>🎬 Both</span>
                     </div>
-                    <span className="text-[10px] opacity-80 font-normal">Stream & Download</span>
+                    <span className="text-[10px] opacity-75 font-normal">Stream & Download</span>
                   </button>
 
                   <button
                     onClick={() => handleStreamingModeChange('download_only')}
-                    className={`py-3 px-3 rounded-xl text-xs font-extrabold flex flex-col items-center gap-1 transition-all border ${
+                    className={`py-2.5 px-3 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all border ${
                       streamingMode === 'download_only'
-                        ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white border-amber-400/50 shadow-lg shadow-amber-600/30'
-                        : 'bg-zinc-900/80 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white'
+                        ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-600/20 font-black'
+                        : 'bg-zinc-950/80 text-zinc-400 border-white/5 hover:bg-zinc-900 hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 font-black">
-                      <span>📥</span>
-                      <span>Download Only</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>📥 Download Only</span>
                     </div>
-                    <span className="text-[10px] opacity-80 font-normal">Blocks Stream Player</span>
+                    <span className="text-[10px] opacity-75 font-normal">Blocks Stream Player</span>
                   </button>
 
                   <button
                     onClick={() => handleStreamingModeChange('stream_only')}
-                    className={`py-3 px-3 rounded-xl text-xs font-extrabold flex flex-col items-center gap-1 transition-all border ${
+                    className={`py-2.5 px-3 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all border ${
                       streamingMode === 'stream_only'
-                        ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white border-cyan-400/50 shadow-lg shadow-cyan-600/30'
-                        : 'bg-zinc-900/80 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-white'
+                        ? 'bg-cyan-600 text-white border-cyan-500 shadow-md shadow-cyan-600/20 font-black'
+                        : 'bg-zinc-950/80 text-zinc-400 border-white/5 hover:bg-zinc-900 hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 font-black">
-                      <span>▶️</span>
-                      <span>Stream Only</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>▶️ Stream Only</span>
                     </div>
-                    <span className="text-[10px] opacity-80 font-normal">Hides Direct Downloads</span>
+                    <span className="text-[10px] opacity-75 font-normal">Hides Direct Downloads</span>
                   </button>
                 </div>
               </div>
 
+              {/* UNIFIED ANALYTICS SECTION */}
+              <div className="space-y-4 pt-2 border-t border-white/5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2 text-white">
+                      <BarChart3 className="w-4 h-4 text-red-500" />
+                      <span>Unified Stream & Download Performance Analytics</span>
+                    </h4>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      {totalStreamsCount} total streams | {totalDownloadsCount} total downloads
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="p-1 rounded-xl bg-zinc-950 border border-white/10 flex items-center gap-1">
+                      <button
+                        onClick={() => setAnalyticsTypeFilter('all')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          analyticsTypeFilter === 'all' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>All</span>
+                      </button>
+
+                      <button
+                        onClick={() => setAnalyticsTypeFilter('stream')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          analyticsTypeFilter === 'stream' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        <Film className="w-3.5 h-3.5" />
+                        <span>Streams</span>
+                      </button>
+
+                      <button
+                        onClick={() => setAnalyticsTypeFilter('download')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          analyticsTypeFilter === 'download' ? 'bg-emerald-600 text-white shadow-md' : 'text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Downloads</span>
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => setShowFilterPanel(prev => !prev)}
+                      className={`p-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
+                        showFilterPanel || activeFilterCount > 0 ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-zinc-900 text-zinc-400 border-white/10'
+                      }`}
+                    >
+                      <Filter className="w-3.5 h-3.5" />
+                      {activeFilterCount > 0 && (
+                        <span className="w-4 h-4 rounded-full bg-red-600 text-white text-[10px] font-black flex items-center justify-center">
+                          {activeFilterCount}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Metric Summary Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="p-3.5 rounded-xl border border-white/5 bg-zinc-900/40">
+                    <div className="flex items-center justify-between text-xs font-medium text-zinc-400 mb-1">
+                      <span>Total Streams</span>
+                      <Film className="w-3.5 h-3.5 text-red-400" />
+                    </div>
+                    <div className="text-xl font-black font-heading text-white">{totalStreamsCount}</div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl border border-white/5 bg-zinc-900/40">
+                    <div className="flex items-center justify-between text-xs font-medium text-zinc-400 mb-1">
+                      <span>Total Downloads</span>
+                      <Download className="w-3.5 h-3.5 text-emerald-400" />
+                    </div>
+                    <div className="text-xl font-black font-heading text-emerald-400">{totalDownloadsCount}</div>
+                  </div>
+
+                  <div className="col-span-2 sm:col-span-1 p-3.5 rounded-xl border border-white/5 bg-zinc-900/40">
+                    <div className="flex items-center justify-between text-xs font-medium text-zinc-400 mb-1">
+                      <span>Stream/Download Ratio</span>
+                      <Activity className="w-3.5 h-3.5 text-amber-400" />
+                    </div>
+                    <div className="text-xl font-black font-heading text-amber-400">
+                      {totalDownloadsCount > 0 ? (totalStreamsCount / totalDownloadsCount).toFixed(1) : '0'}x
+                    </div>
+                  </div>
+                </div>
+
+                {/* Collapsible Filter Panel */}
+                {showFilterPanel && (
+                  <div className="p-3.5 rounded-xl border border-white/10 bg-zinc-950 flex items-center justify-between gap-3 animate-fadeIn">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-3.5 h-3.5 text-red-500" />
+                        <select
+                          value={analyticsDateRange}
+                          onChange={(e) => setAnalyticsDateRange(e.target.value)}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-zinc-900 border border-white/10 text-white focus:outline-none"
+                        >
+                          <option value="all">All Time</option>
+                          <option value="today">Today</option>
+                          <option value="7days">Last 7 Days</option>
+                          <option value="30days">Last 30 Days</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Filter className="w-3.5 h-3.5 text-emerald-400" />
+                        <select
+                          value={analyticsQuality}
+                          onChange={(e) => setAnalyticsQuality(e.target.value)}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-zinc-900 border border-white/10 text-white focus:outline-none"
+                        >
+                          <option value="all">All Qualities</option>
+                          <option value="4K">4K Ultra HD</option>
+                          <option value="1080p">1080p Full HD</option>
+                          <option value="720p">720p HD</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {activeFilterCount > 0 && (
+                      <button onClick={handleResetFilters} className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-1">
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Movie Analytics Table */}
+                <div className="rounded-2xl border border-white/5 bg-zinc-950/60 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-white/5 bg-zinc-900/60 text-[10px] font-bold uppercase text-zinc-400 font-mono">
+                          <th className="py-3 px-4">Movie Title</th>
+                          <th className="py-3 px-4">Movie UID</th>
+                          <th className="py-3 px-4 text-center">Streams</th>
+                          <th className="py-3 px-4 text-center">Downloads</th>
+                          <th className="py-3 px-4 text-right">Last Active</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5 text-xs font-mono">
+                        {displayedAnalytics.length === 0 ? (
+                          <tr>
+                            <td colSpan="5" className="py-8 text-center text-zinc-500">
+                              No analytics data recorded for this filter.
+                            </td>
+                          </tr>
+                        ) : (
+                          displayedAnalytics.map(item => (
+                            <tr key={item.movie_uid} className="hover:bg-white/5 transition-colors">
+                              <td className="py-3 px-4 font-sans font-bold text-xs text-white">
+                                <div>{item.title || item.movie_uid}</div>
+                                {item.qualitiesList && item.qualitiesList.length > 0 && (
+                                  <div className="flex items-center gap-1 mt-1">
+                                    {item.qualitiesList.map(q => (
+                                      <span key={q} className="px-1.5 py-0.2 text-[9px] font-mono font-bold bg-red-500/10 text-red-400 border border-red-500/20 rounded">
+                                        {q}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-red-400 font-mono text-[10px]">{item.movie_uid}</td>
+                              <td className="py-3 px-4 text-center">
+                                <span className="px-2 py-0.5 rounded-md bg-red-500/10 text-red-400 border border-red-500/20 font-bold">
+                                  {item.total_views}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+                                  {item.total_downloads}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-right text-zinc-400 text-[10px]">
+                                {item.last_watched ? new Date(item.last_watched).toLocaleDateString() : 'Recently'}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* HUB 2: 🛡️ ACCESS & POLICY CONTROL (Combines Policy Matrix + RBAC Users) */}
+          {(activeTab === 'access_policy' || activeTab === 'role_policies' || activeTab === 'users') && (
+            <div className="space-y-6 animate-fadeIn">
+              {/* Dynamic Role Entitlement Policy Control Matrix */}
+              <div className="p-5 rounded-2xl border border-white/5 bg-zinc-900/30 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <div>
+                      <h3 className="font-extrabold text-xs text-white uppercase tracking-wider">Dynamic Role Policy Control</h3>
+                      <p className="text-[11px] text-zinc-400">Configure real-time permissions per User Role (Normal, Premium, Admin).</p>
+                    </div>
+                  </div>
+                  {isSavingPolicies && (
+                    <span className="text-[11px] font-mono font-bold text-amber-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                      Saving DB...
+                    </span>
+                  )}
+                </div>
+
+                {/* Role Matrix Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                  {['normal', 'premium', 'admin'].map((roleKey) => {
+                    const policy = rolePolicies[roleKey] || DEFAULT_ROLE_POLICIES[roleKey];
+                    const isNormal = roleKey === 'normal';
+                    const isPrem = roleKey === 'premium';
+                    const isAdmin = roleKey === 'admin';
+
+                    const roleTitle = isNormal ? 'Normal User' : (isPrem ? '⭐ Premium Member' : '👑 Admin User');
+                    const badgeStyle = isNormal 
+                      ? 'bg-zinc-800 text-zinc-300 border-zinc-700' 
+                      : (isPrem ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20');
+
+                    const handleTogglePolicy = (key, value) => {
+                      const updated = {
+                        ...rolePolicies,
+                        [roleKey]: {
+                          ...policy,
+                          [key]: value
+                        }
+                      };
+                      setRolePoliciesState(updated);
+                      setIsSavingPolicies(true);
+                      setRolePolicies(updated).then(() => setIsSavingPolicies(false));
+                    };
+
+                    return (
+                      <div key={roleKey} className="p-4 rounded-2xl border border-white/5 bg-zinc-950/90 space-y-3.5">
+                        <div className={`p-2 rounded-xl border ${badgeStyle} font-bold text-xs uppercase tracking-wider flex items-center justify-between`}>
+                          <span>{roleTitle}</span>
+                          <span className="text-[10px] font-mono opacity-70">Role: {roleKey}</span>
+                        </div>
+
+                        {/* Max Resolution Selector */}
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-zinc-400 flex items-center justify-between">
+                            <span>Max Quality</span>
+                            <span className="text-white font-mono font-bold">{policy.max_resolution}</span>
+                          </label>
+                          <select
+                            value={policy.max_resolution}
+                            onChange={(e) => handleTogglePolicy('max_resolution', e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl text-xs font-bold bg-zinc-900 border border-white/10 text-white focus:outline-none"
+                          >
+                            <option value="480p">480p Standard</option>
+                            <option value="720p">720p HD</option>
+                            <option value="1080p">1080p Full HD</option>
+                            <option value="4K">4K Ultra HD</option>
+                          </select>
+                        </div>
+
+                        {/* Direct Download Toggle */}
+                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/50 border border-white/5">
+                          <div>
+                            <span className="text-xs font-bold text-zinc-200 block">Direct Download</span>
+                            <span className="text-[10px] text-zinc-500 block">Allow "Download Now"</span>
+                          </div>
+                          <button
+                            onClick={() => handleTogglePolicy('download_access', !policy.download_access)}
+                            className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 ${
+                              policy.download_access ? 'bg-emerald-500' : 'bg-zinc-700'
+                            }`}
+                          >
+                            <span className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                              policy.download_access ? 'translate-x-4' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {/* External Player Access Toggle */}
+                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/50 border border-white/5">
+                          <div>
+                            <span className="text-xs font-bold text-zinc-200 block">External Player</span>
+                            <span className="text-[10px] text-zinc-500 block">Allow VLC/MX Handoff</span>
+                          </div>
+                          <button
+                            onClick={() => handleTogglePolicy('external_player', !policy.external_player)}
+                            className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 ${
+                              policy.external_player ? 'bg-emerald-500' : 'bg-zinc-700'
+                            }`}
+                          >
+                            <span className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                              policy.external_player ? 'translate-x-4' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {/* Adsterra Popunder Ad Engine Toggle */}
+                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/50 border border-white/5">
+                          <div>
+                            <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
+                              <span>Adsterra Ads</span>
+                              <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
+                                policy.enable_ads !== false ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              }`}>
+                                {policy.enable_ads !== false ? '📢 ACTIVE' : '🚫 AD-FREE'}
+                              </span>
+                            </span>
+                            <span className="text-[10px] text-zinc-500 block">Popunder Ads Engine</span>
+                          </div>
+                          <button
+                            onClick={() => handleTogglePolicy('enable_ads', policy.enable_ads === false ? true : false)}
+                            className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 ${
+                              policy.enable_ads !== false ? 'bg-red-600' : 'bg-zinc-700'
+                            }`}
+                          >
+                            <span className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                              policy.enable_ads !== false ? 'translate-x-4' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* RBAC USER MANAGEMENT SECTION */}
+              <div className="space-y-4 pt-2 border-t border-white/5">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-2 text-white">
+                    <Users className="w-4 h-4 text-indigo-400" />
+                    <span>RBAC User Management ({registeredUsers.length})</span>
+                  </h4>
+                </div>
+
+                {/* Add Admin & Search Bar */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <form onSubmit={handleAddManualAdmin} className="relative flex items-center">
+                    <input
+                      type="number"
+                      placeholder="Enter Telegram User ID"
+                      value={newAdminIdInput}
+                      onChange={(e) => setNewAdminIdInput(e.target.value)}
+                      className="w-full pl-4 pr-32 py-2.5 rounded-2xl bg-zinc-900 border border-white/10 text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-red-500/40"
+                    />
+                    <button type="submit" className="absolute right-1.5 px-3 py-1.5 bg-gradient-to-r from-red-600 to-rose-600 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-md">
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>Add Admin</span>
+                    </button>
+                  </form>
+
+                  <div className="relative flex items-center">
+                    <Search className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                    <input
+                      type="text"
+                      placeholder="Search Users by Name, Username, or ID..."
+                      value={userSearchQuery}
+                      onChange={(e) => setUserSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-zinc-900 border border-white/10 text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-red-500/40"
+                    />
+                  </div>
+                </div>
+
+                {/* User Cards Grid View */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {filteredUsers.map(user => {
+                    const isSuper = Number(user.telegram_user_id) === 0;
+                    const isAdmin = user.role === 'admin' || adminIds.includes(Number(user.telegram_user_id));
+                    const isBanned = bannedUserIds.includes(Number(user.telegram_user_id));
+                    const userName = user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user.username || `User #${user.telegram_user_id}`;
+
+                    return (
+                      <div
+                        key={user.id}
+                        onClick={() => setSelectedUser(user)}
+                        className={`p-3.5 rounded-2xl border transition-all cursor-pointer hover:scale-[1.02] flex flex-col justify-between space-y-3 ${
+                          isSuper
+                            ? 'bg-gradient-to-br from-amber-950/40 to-zinc-950 border-amber-500/40'
+                            : isBanned
+                              ? 'bg-red-950/20 border-red-500/40 opacity-75'
+                              : isAdmin
+                              ? 'bg-zinc-900/90 border-red-500/30'
+                              : user.role === 'premium'
+                                ? 'bg-gradient-to-br from-amber-950/20 to-zinc-900/90 border-amber-500/30'
+                                : 'bg-zinc-900/50 border-white/5 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {user.avatar_url ? (
+                            <img src={user.avatar_url} alt="" className="w-9 h-9 rounded-xl object-cover border border-white/10 shrink-0" />
+                          ) : (
+                            <div className="w-9 h-9 rounded-xl bg-zinc-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                              <User className="w-4 h-4 text-zinc-400" />
+                            </div>
+                          )}
+
+                          <div className="min-w-0">
+                            <div className="font-bold text-xs text-white truncate flex items-center gap-1.5">
+                              <span>{userName}</span>
+                            </div>
+                            <div className="text-[10px] font-mono text-zinc-400 truncate">
+                              ID: {user.telegram_user_id} {user.username ? `@${user.username}` : ''}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                          {isSuper ? (
+                            <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-md">OWNER</span>
+                          ) : isBanned ? (
+                            <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-red-600/30 text-red-400 border border-red-500/40 rounded-md flex items-center gap-1">
+                              <Ban className="w-3 h-3" />
+                              BANNED
+                            </span>
+                          ) : isAdmin ? (
+                            <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-red-500/20 text-red-400 border border-red-500/30 rounded-md">ADMIN</span>
+                          ) : user.role === 'premium' ? (
+                            <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-md">⭐ PREMIUM</span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-[9px] font-bold uppercase bg-zinc-800 text-zinc-400 border border-white/5 rounded-md">NORMAL</span>
+                          )}
+
+                          <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
+                            <span>Details</span>
+                            <ArrowRight className="w-3 h-3 text-zinc-400" />
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* HUB 3: 📡 HEALTH & AUDIT LOGS (Combines Telemetry + Watch/Download History Logs) */}
+          {(activeTab === 'health_logs' || activeTab === 'telemetry' || activeTab === 'watch_history') && (
+            <div className="space-y-6 animate-fadeIn">
               {/* Cloud Terminal Real-Time Pulse Card */}
               <div className="p-5 rounded-2xl border bg-black/70 border-white/10 space-y-3.5">
                 <div className="flex items-center justify-between border-b border-white/10 pb-3">
@@ -766,522 +1183,90 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                   </div>
                 )}
               </div>
-            </div>
-          )}
 
-          {/* 2. UNIFIED ANALYTICS & SMART ICON FILTERS */}
-          {activeTab === 'analytics' && (
-            <div className="space-y-6 animate-fadeIn">
-              {/* Header & Minimalist Smart Icon Filters */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h4 className="text-sm font-black uppercase tracking-wider flex items-center gap-2 text-white">
-                    <BarChart3 className="w-4.5 h-4.5 text-red-500" />
-                    <span>Unified Stream & Download Insights</span>
-                  </h4>
-                  <p className="text-xs text-zinc-400 mt-0.5">
-                    {totalStreamsCount} total streams | {totalDownloadsCount} total downloads
-                  </p>
-                </div>
-
-                {/* Minimalist Smart Icon Filter Toggle */}
-                <div className="flex items-center gap-2">
-                  <div className="p-1 rounded-2xl bg-zinc-900 border border-white/10 flex items-center gap-1">
+              {/* AUDIT LOGS SUB-NAV & FEED */}
+              <div className="space-y-4 pt-2 border-t border-white/5">
+                <div className="flex items-center justify-between">
+                  <div className="p-1 rounded-xl bg-zinc-950 border border-white/10 flex items-center gap-1">
                     <button
-                      onClick={() => setAnalyticsTypeFilter('all')}
-                      className={`p-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                        analyticsTypeFilter === 'all' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-400 hover:text-white'
+                      onClick={() => setHealthLogsSubTab('telemetry')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        healthLogsSubTab === 'telemetry' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-400 hover:text-white'
                       }`}
-                      title="All Activity"
                     >
-                      <Layers className="w-4 h-4" />
-                      <span className="hidden sm:inline">All</span>
+                      <Radio className="w-3.5 h-3.5" />
+                      <span>Edge Telemetry ({analyticsLogs.length})</span>
                     </button>
 
                     <button
-                      onClick={() => setAnalyticsTypeFilter('stream')}
-                      className={`p-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                        analyticsTypeFilter === 'stream' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-400 hover:text-white'
+                      onClick={() => setHealthLogsSubTab('watch_history')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        healthLogsSubTab === 'watch_history' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-400 hover:text-white'
                       }`}
-                      title="Streams Only"
                     >
-                      <Film className="w-4 h-4" />
-                      <span className="hidden sm:inline">Streams</span>
-                    </button>
-
-                    <button
-                      onClick={() => setAnalyticsTypeFilter('download')}
-                      className={`p-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                        analyticsTypeFilter === 'download' ? 'bg-emerald-600 text-white shadow-md' : 'text-zinc-400 hover:text-white'
-                      }`}
-                      title="Downloads Only"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span className="hidden sm:inline">Downloads</span>
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>User Audit Logs ({watchLogs.length + downloadLogs.length})</span>
                     </button>
                   </div>
-
-                  <button
-                    onClick={() => setShowFilterPanel(prev => !prev)}
-                    className={`p-2.5 rounded-2xl border text-xs font-bold flex items-center gap-2 transition-all ${
-                      showFilterPanel || activeFilterCount > 0 ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-zinc-900 text-zinc-400 border-white/10'
-                    }`}
-                    title="Toggle Date & Quality Filters"
-                  >
-                    <Filter className="w-4 h-4" />
-                    {activeFilterCount > 0 && (
-                      <span className="w-4 h-4 rounded-full bg-red-600 text-white text-[10px] font-black flex items-center justify-center">
-                        {activeFilterCount}
-                      </span>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Summary Metric Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
-                <div className="p-4 rounded-2xl border bg-zinc-900/90 border-white/10">
-                  <div className="flex items-center justify-between text-xs font-bold text-zinc-400 mb-1">
-                    <span>Total Streams</span>
-                    <Film className="w-4 h-4 text-red-500" />
-                  </div>
-                  <div className="text-2xl font-black font-heading text-white">{totalStreamsCount}</div>
                 </div>
 
-                <div className="p-4 rounded-2xl border bg-zinc-900/90 border-white/10">
-                  <div className="flex items-center justify-between text-xs font-bold text-zinc-400 mb-1">
-                    <span>Total Downloads</span>
-                    <Download className="w-4 h-4 text-emerald-400" />
-                  </div>
-                  <div className="text-2xl font-black font-heading text-emerald-400">{totalDownloadsCount}</div>
-                </div>
-
-                <div className="col-span-2 sm:col-span-1 p-4 rounded-2xl border bg-zinc-900/90 border-white/10">
-                  <div className="flex items-center justify-between text-xs font-bold text-zinc-400 mb-1">
-                    <span>Stream/Download Ratio</span>
-                    <Activity className="w-4 h-4 text-amber-400" />
-                  </div>
-                  <div className="text-2xl font-black font-heading text-amber-400">
-                    {totalDownloadsCount > 0 ? (totalStreamsCount / totalDownloadsCount).toFixed(1) : '0'}x
-                  </div>
-                </div>
-              </div>
-
-              {/* Collapsible Filter Panel */}
-              {showFilterPanel && (
-                <div className="p-4 rounded-2xl border bg-zinc-900/90 border-white/10 flex items-center justify-between gap-3 animate-fadeIn">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-3.5 h-3.5 text-red-500" />
-                      <select
-                        value={analyticsDateRange}
-                        onChange={(e) => setAnalyticsDateRange(e.target.value)}
-                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-zinc-950 border border-white/10 text-white focus:outline-none"
-                      >
-                        <option value="all">All Time</option>
-                        <option value="today">Today</option>
-                        <option value="7days">Last 7 Days</option>
-                        <option value="30days">Last 30 Days</option>
-                      </select>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Filter className="w-3.5 h-3.5 text-emerald-400" />
-                      <select
-                        value={analyticsQuality}
-                        onChange={(e) => setAnalyticsQuality(e.target.value)}
-                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-zinc-950 border border-white/10 text-white focus:outline-none"
-                      >
-                        <option value="all">All Qualities</option>
-                        <option value="4K">4K Ultra HD</option>
-                        <option value="1080p">1080p Full HD</option>
-                        <option value="720p">720p HD</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {activeFilterCount > 0 && (
-                    <button onClick={handleResetFilters} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-1">
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Reset</span>
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Dark-Themed Table View for Movie Analytics */}
-              <div className="rounded-2xl border border-white/10 bg-zinc-900/60 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-white/10 bg-zinc-950/80 text-[11px] font-black uppercase text-zinc-400 font-mono">
-                        <th className="py-4 px-5">Movie Title</th>
-                        <th className="py-4 px-5">Movie UID</th>
-                        <th className="py-4 px-5 text-center">Streams</th>
-                        <th className="py-4 px-5 text-center">Downloads</th>
-                        <th className="py-4 px-5 text-right">Last Active</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5 text-xs font-mono">
-                      {displayedAnalytics.length === 0 ? (
-                        <tr>
-                          <td colSpan="5" className="py-12 text-center text-zinc-500">
-                            No analytics data recorded for this filter.
-                          </td>
-                        </tr>
-                      ) : (
-                        displayedAnalytics.map(item => (
-                          <tr key={item.movie_uid} className="hover:bg-white/5 transition-colors">
-                            <td className="py-4 px-5 font-sans font-bold text-sm text-white">
-                              <div>{item.title || item.movie_uid}</div>
-                              {item.qualitiesList && item.qualitiesList.length > 0 && (
-                                <div className="flex items-center gap-1 mt-1">
-                                  {item.qualitiesList.map(q => (
-                                    <span key={q} className="px-2 py-0.5 text-[9px] font-mono font-bold bg-red-500/10 text-red-400 border border-red-500/20 rounded">
-                                      {q}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-4 px-5 text-red-400 font-mono text-[11px]">{item.movie_uid}</td>
-                            <td className="py-4 px-5 text-center">
-                              <span className="px-3 py-1 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 font-bold">
-                                {item.total_views}
-                              </span>
-                            </td>
-                            <td className="py-4 px-5 text-center">
-                              <span className="px-3 py-1 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
-                                {item.total_downloads}
-                              </span>
-                            </td>
-                            <td className="py-4 px-5 text-right text-zinc-400 text-[11px]">
-                              {item.last_watched ? new Date(item.last_watched).toLocaleDateString() : 'Recently'}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 2.5 DYNAMIC ROLE ENTITLEMENT POLICY MATRIX */}
-          {activeTab === 'role_policies' && (
-            <div className="space-y-6 animate-fadeIn">
-              <div className="p-5 rounded-2xl border bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border-white/10 space-y-4">
-                <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                    <div>
-                      <h3 className="font-black text-sm text-white">Dynamic Role Entitlement Policy Control Matrix</h3>
-                      <p className="text-xs text-zinc-400">Configure real-time streaming & feature permissions per User Role (Normal, Premium, Admin).</p>
-                    </div>
-                  </div>
-                  {isSavingPolicies && (
-                    <span className="text-xs font-mono font-bold text-amber-400 flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-                      Saving DB...
-                    </span>
-                  )}
-                </div>
-
-                {/* Role Matrix Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {['normal', 'premium', 'admin'].map((roleKey) => {
-                    const policy = rolePolicies[roleKey] || DEFAULT_ROLE_POLICIES[roleKey];
-                    const isNormal = roleKey === 'normal';
-                    const isPrem = roleKey === 'premium';
-                    const isAdmin = roleKey === 'admin';
-
-                    const roleTitle = isNormal ? 'Normal User' : (isPrem ? '⭐ Premium Member' : '👑 Admin User');
-                    const headerGradient = isNormal 
-                      ? 'from-zinc-800 to-zinc-900 border-zinc-700 text-zinc-300' 
-                      : (isPrem ? 'from-amber-600/30 to-amber-950/40 border-amber-500/40 text-amber-400' : 'from-red-600/30 to-rose-950/40 border-red-500/40 text-rose-400');
-
-                    const handleTogglePolicy = (key, value) => {
-                      const updated = {
-                        ...rolePolicies,
-                        [roleKey]: {
-                          ...policy,
-                          [key]: value
-                        }
-                      };
-                      setRolePoliciesState(updated);
-                      setIsSavingPolicies(true);
-                      setRolePolicies(updated).then(() => setIsSavingPolicies(false));
-                    };
-
-                    return (
-                      <div key={roleKey} className={`p-4 rounded-2xl border bg-black/60 space-y-4`}>
-                        <div className={`p-2.5 rounded-xl border bg-gradient-to-r ${headerGradient} font-black text-xs uppercase tracking-wider flex items-center justify-between`}>
-                          <span>{roleTitle}</span>
-                          <span className="text-[10px] font-mono opacity-80 font-normal">Role: {roleKey}</span>
-                        </div>
-
-                        {/* Max Resolution Selector */}
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-bold text-zinc-400 flex items-center justify-between">
-                            <span>Max Streaming Quality:</span>
-                            <span className="text-white font-mono font-black">{policy.max_resolution}</span>
-                          </label>
-                          <select
-                            value={policy.max_resolution}
-                            onChange={(e) => handleTogglePolicy('max_resolution', e.target.value)}
-                            className="w-full px-3 py-2 rounded-xl text-xs font-bold bg-zinc-900 border border-white/10 text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                          >
-                            <option value="480p">480p Standard</option>
-                            <option value="720p">720p HD</option>
-                            <option value="1080p">1080p Full HD</option>
-                            <option value="4K">4K Ultra HD</option>
-                          </select>
-                        </div>
-
-                        {/* Download Access Toggle */}
-                        <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/80 border border-white/5">
+                {/* Sub-Tab View: Telemetry Logs */}
+                {healthLogsSubTab === 'telemetry' && (
+                  <div className="space-y-2 font-mono text-xs animate-fadeIn">
+                    {analyticsLogs.length === 0 ? (
+                      <div className="p-8 text-center text-zinc-500 bg-zinc-950/40 rounded-2xl border border-white/5">
+                        No real-time edge telemetry logs recorded.
+                      </div>
+                    ) : (
+                      analyticsLogs.map(log => (
+                        <div key={log.id} className="p-3.5 rounded-2xl border bg-zinc-900/60 border-white/5 flex items-center justify-between">
                           <div>
-                            <span className="text-xs font-bold text-zinc-300 block">Direct Download</span>
-                            <span className="text-[10px] text-zinc-500 block">Allow "Download Now" button</span>
+                            <div className="font-bold text-red-400">{log.movie_uid}</div>
+                            <div className="text-[10px] text-zinc-500 mt-0.5">User ID: {log.telegram_user_id}</div>
                           </div>
-                          <button
-                            onClick={() => handleTogglePolicy('download_access', !policy.download_access)}
-                            className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
-                              policy.download_access ? 'bg-emerald-500' : 'bg-zinc-700'
-                            }`}
-                          >
-                            <span className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                              policy.download_access ? 'translate-x-5' : 'translate-x-0'
-                            }`} />
-                          </button>
-                        </div>
-
-                        {/* External Player Access Toggle */}
-                        <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/80 border border-white/5">
-                          <div>
-                            <span className="text-xs font-bold text-zinc-300 block">External Player</span>
-                            <span className="text-[10px] text-zinc-500 block">Allow VLC/MX Handoff</span>
-                          </div>
-                          <button
-                            onClick={() => handleTogglePolicy('external_player', !policy.external_player)}
-                            className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
-                              policy.external_player ? 'bg-emerald-500' : 'bg-zinc-700'
-                            }`}
-                          >
-                            <span className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                              policy.external_player ? 'translate-x-5' : 'translate-x-0'
-                            }`} />
-                          </button>
-                        </div>
-
-                        {/* Adsterra Popunder Ad Engine Toggle */}
-                        <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/80 border border-white/5">
-                          <div>
-                            <span className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
-                              <span>Adsterra Ads Engine</span>
-                              <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
-                                policy.enable_ads !== false ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                              }`}>
-                                {policy.enable_ads !== false ? '📢 ACTIVE' : '🚫 AD-FREE'}
-                              </span>
+                          <div className="text-right">
+                            <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">
+                              {log.quality_watched || '1080p'} (SA #{log.sa_account_index || 1})
                             </span>
-                            <span className="text-[10px] text-zinc-500 block">Inject Popunder Ad Script for this Role</span>
-                          </div>
-                          <button
-                            onClick={() => handleTogglePolicy('enable_ads', policy.enable_ads === false ? true : false)}
-                            className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
-                              policy.enable_ads !== false ? 'bg-red-600' : 'bg-zinc-700'
-                            }`}
-                          >
-                            <span className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                              policy.enable_ads !== false ? 'translate-x-5' : 'translate-x-0'
-                            }`} />
-                          </button>
-                        </div>
-
-                        {/* Mesh Priority & Parallel Streams Info */}
-                        <div className="p-3 rounded-xl bg-zinc-950/90 border border-white/5 text-[11px] font-mono space-y-1">
-                          <div className="flex items-center justify-between text-zinc-400">
-                            <span>Mesh Queue:</span>
-                            <span className="text-amber-400 font-bold">{policy.sa_mesh_priority || 'Standard'}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-zinc-400">
-                            <span>Max Parallel:</span>
-                            <span className="text-emerald-400 font-bold">{policy.parallel_streams || 1} Streams</span>
+                            <div className="text-[10px] text-zinc-500 mt-1">
+                              {log.watched_at ? new Date(log.watched_at).toLocaleTimeString() : 'Just now'}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 3. CONTEXTUAL RBAC USER MANAGEMENT */}
-          {activeTab === 'users' && (
-            <div className="space-y-5 animate-fadeIn">
-              {/* Add Admin & Search Bar */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <form onSubmit={handleAddManualAdmin} className="relative flex items-center">
-                  <input
-                    type="number"
-                    placeholder="Enter Telegram User ID"
-                    value={newAdminIdInput}
-                    onChange={(e) => setNewAdminIdInput(e.target.value)}
-                    className="w-full pl-4 pr-32 py-3 rounded-2xl bg-zinc-900 border border-white/10 text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-red-500/40"
-                  />
-                  <button type="submit" className="absolute right-1.5 px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 text-white text-xs font-black rounded-xl flex items-center gap-1 shadow-md">
-                    <UserPlus className="w-3.5 h-3.5" />
-                    <span>Add Admin</span>
-                  </button>
-                </form>
-
-                <div className="relative flex items-center">
-                  <Search className="w-4 h-4 text-zinc-500 absolute left-3.5" />
-                  <input
-                    type="text"
-                    placeholder="Search Users by Name, Username, or ID..."
-                    value={userSearchQuery}
-                    onChange={(e) => setUserSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 rounded-2xl bg-zinc-900 border border-white/10 text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-red-500/40"
-                  />
-                </div>
-              </div>
-
-              {/* User Grid Card View */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                {filteredUsers.map(user => {
-                  const isSuper = Number(user.telegram_user_id) === 0;
-                  const isAdmin = user.role === 'admin' || adminIds.includes(Number(user.telegram_user_id));
-                  const isBanned = bannedUserIds.includes(Number(user.telegram_user_id));
-                  const userName = user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user.username || `User #${user.telegram_user_id}`;
-
-                  return (
-                    <div
-                      key={user.id}
-                      onClick={() => setSelectedUser(user)}
-                      className={`p-4 rounded-2xl border transition-all cursor-pointer hover:scale-[1.02] flex flex-col justify-between space-y-3 ${
-                        isSuper
-                          ? 'bg-gradient-to-br from-amber-950/40 to-zinc-950 border-amber-500/40'
-                          : isBanned
-                            ? 'bg-red-950/20 border-red-500/40 opacity-75'
-                            : isAdmin
-                            ? 'bg-zinc-900/90 border-red-500/30'
-                            : user.role === 'premium'
-                              ? 'bg-gradient-to-br from-amber-950/20 to-zinc-900/90 border-amber-500/30'
-                              : 'bg-zinc-900/50 border-white/5 hover:border-white/20'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        {user.avatar_url ? (
-                          <img src={user.avatar_url} alt="" className="w-10 h-10 rounded-2xl object-cover border border-white/10 shrink-0" />
-                        ) : (
-                          <div className="w-10 h-10 rounded-2xl bg-zinc-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
-                            <User className="w-5 h-5 text-zinc-400" />
-                          </div>
-                        )}
-
-                        <div className="min-w-0">
-                          <div className="font-bold text-sm text-white truncate flex items-center gap-1.5">
-                            <span>{userName}</span>
-                          </div>
-                          <div className="text-[10px] font-mono text-zinc-400 truncate">
-                            ID: {user.telegram_user_id} {user.username ? `@${user.username}` : ''}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-2 border-t border-white/5">
-                        {/* Dynamic Role & Privileges Badge */}
-                        {isSuper ? (
-                          <span className="px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-md">
-                            OWNER
-                          </span>
-                        ) : isBanned ? (
-                          <span className="px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-red-600/30 text-red-400 border border-red-500/40 rounded-md flex items-center gap-1">
-                            <Ban className="w-3 h-3" />
-                            BANNED
-                          </span>
-                        ) : isAdmin ? (
-                          <span className="px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/30 rounded-md">
-                            ADMIN
-                          </span>
-                        ) : user.role === 'premium' ? (
-                          <span className="px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 border border-amber-500/40 rounded-md">
-                            ⭐ PREMIUM
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-400 border border-white/5 rounded-md">
-                            NORMAL
-                          </span>
-                        )}
-
-                        <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
-                          <span>Details</span>
-                          <ArrowRight className="w-3 h-3 text-zinc-400" />
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* 4. TELEMETRY & LOGS TAB */}
-          {activeTab === 'telemetry' && (
-            <div className="space-y-3 animate-fadeIn">
-              <h4 className="text-xs font-black uppercase text-zinc-400 font-mono">
-                Real-Time Edge Telemetry Logs ({analyticsLogs.length})
-              </h4>
-              <div className="space-y-2">
-                {analyticsLogs.map(log => (
-                  <div key={log.id} className="p-3.5 rounded-2xl border bg-zinc-900/60 border-white/5 flex items-center justify-between text-xs font-mono">
-                    <div>
-                      <div className="font-bold text-red-400">{log.movie_uid}</div>
-                      <div className="text-[10px] text-zinc-500 mt-0.5">User ID: {log.telegram_user_id}</div>
-                    </div>
-                    <div className="text-right">
-                      <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">
-                        {log.quality_watched || '1080p'} (SA #{log.sa_account_index || 1})
-                      </span>
-                      <div className="text-[10px] text-zinc-500 mt-1">
-                        {log.watched_at ? new Date(log.watched_at).toLocaleTimeString() : 'Just now'}
-                      </div>
-                    </div>
+                      ))
+                    )}
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                )}
 
-          {/* 5. WATCH HISTORY LOGS TAB */}
-          {activeTab === 'watch_history' && (
-            <div className="space-y-3 animate-fadeIn">
-              <h4 className="text-xs font-black uppercase text-zinc-400 font-mono">
-                User Activity & Watch History Logs ({watchLogs.length})
-              </h4>
-              <div className="space-y-2">
-                {watchLogs.map(w => (
-                  <div key={w.id} className="p-3.5 rounded-2xl border bg-zinc-900/60 border-white/5 flex items-center justify-between text-xs font-mono">
-                    <div>
-                      <div className="font-bold text-white">{w.movie_uid}</div>
-                      <div className="text-[10px] text-zinc-400 mt-0.5">
-                        Progress: {w.progress_seconds || 0}s / {w.duration_seconds || 0}s
+                {/* Sub-Tab View: User Audit Logs */}
+                {healthLogsSubTab === 'watch_history' && (
+                  <div className="space-y-2 font-mono text-xs animate-fadeIn">
+                    {watchLogs.length === 0 && downloadLogs.length === 0 ? (
+                      <div className="p-8 text-center text-zinc-500 bg-zinc-950/40 rounded-2xl border border-white/5">
+                        No watch history or download audit logs recorded.
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="px-2.5 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[10px] font-bold">
-                        User #{w.telegram_user_id || 'Guest'}
-                      </span>
-                      <div className="text-[10px] text-zinc-500 mt-1">
-                        {w.updated_at ? new Date(w.updated_at).toLocaleString() : 'Recently'}
-                      </div>
-                    </div>
+                    ) : (
+                      watchLogs.map(w => (
+                        <div key={w.id} className="p-3.5 rounded-2xl border bg-zinc-900/60 border-white/5 flex items-center justify-between">
+                          <div>
+                            <div className="font-bold text-white">{w.movie_uid}</div>
+                            <div className="text-[10px] text-zinc-400 mt-0.5">
+                              Progress: {w.progress_seconds || 0}s / {w.duration_seconds || 0}s
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="px-2.5 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[10px] font-bold">
+                              User #{w.telegram_user_id || 'Guest'}
+                            </span>
+                            <div className="text-[10px] text-zinc-500 mt-1">
+                              {w.updated_at ? new Date(w.updated_at).toLocaleString() : 'Recently'}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
-                ))}
+                )}
               </div>
             </div>
           )}

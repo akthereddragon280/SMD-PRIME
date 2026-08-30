@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Play, Tv, Copy, Check, ShieldCheck } from 'lucide-react';
-import { triggerHaptic, openExternalLink } from '../utils/telegram';
+import { triggerHaptic, openExternalLink, getTelegramUserInfo } from '../utils/telegram';
+import { triggerIntentionalAd } from '../utils/adEngine';
+import { getRolePolicies, getUserEntitlements } from '../supabaseClient';
 
 /**
  * Realistic VLC Traffic Cone SVG Component
@@ -102,6 +104,19 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
 
     const rawStreamUrl = urls.raw;
     if (!rawStreamUrl) return;
+
+    try {
+      const tgUser = getTelegramUserInfo();
+      const role = tgUser?.role || 'normal';
+      getRolePolicies().then(policies => {
+        const entitlement = getUserEntitlements(role, policies);
+        triggerIntentionalAd({
+          userRole: role,
+          enableAds: entitlement.enable_ads,
+          actionType: 'play'
+        });
+      });
+    } catch (err) {}
 
     // 1. Instantly trigger parent callback to pause HTML5 video & release hardware video decoder
     if (typeof onExternalPlayTriggered === 'function') {

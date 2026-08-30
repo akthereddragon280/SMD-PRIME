@@ -572,13 +572,17 @@ function getSortedVideoSources(sourcesList = []) {
   });
 }
 
-  // 9b. Fullscreen Engine: Native requestFullscreen + Telegram Mini App CSS Fake Landscape Hack
+  // 9b. TMA-Guarded Fullscreen & 90-Degree Rotated Landscape Engine
   const toggleFullscreen = async () => {
     triggerHaptic('medium');
 
-    const isInsideTelegram = Boolean(window.Telegram?.WebApp?.initData && window.Telegram.WebApp.initData.length > 0);
+    const isInsideTelegram = Boolean(
+      (window.Telegram?.WebApp?.initData && window.Telegram.WebApp.initData.length > 0) ||
+      window.Telegram?.WebApp?.initDataUnsafe?.user ||
+      (window.Telegram?.WebApp && window.Telegram.WebApp.platform !== 'unknown')
+    );
 
-    // If currently in any fullscreen mode (fake or real), exit fullscreen cleanly
+    // 1. Exit Fullscreen cleanly if currently active
     if (isFakeFullscreen || isFullscreen || document.fullscreenElement) {
       if (document.fullscreenElement && document.exitFullscreen) {
         try {
@@ -605,19 +609,36 @@ function getSortedVideoSources(sourcesList = []) {
       return;
     }
 
-    // Try Telegram native fullscreen API first
-    if (window.Telegram?.WebApp?.requestFullscreen) {
-      try {
-        window.Telegram.WebApp.requestFullscreen();
-        setIsFullscreen(true);
-        return;
-      } catch (e) {}
+    // 2. TMA-Only Guard: Triggered ONLY inside Telegram Mini App
+    if (isInsideTelegram) {
+      // Step A: Trigger Native Telegram Fullscreen & Expansion
+      if (window.Telegram?.WebApp?.requestFullscreen) {
+        try {
+          window.Telegram.WebApp.requestFullscreen();
+        } catch (e) {}
+      }
+      if (window.Telegram?.WebApp?.expand) {
+        try {
+          window.Telegram.WebApp.expand();
+        } catch (e) {}
+      }
+      if (window.Telegram?.WebApp?.lockOrientation) {
+        try {
+          window.Telegram.WebApp.lockOrientation();
+        } catch (e) {}
+      }
+
+      // Step B: Force 90-Degree Rotated Landscape View & Transposed Gesture Overlay
+      setIsFakeFullscreen(true);
+      setIsFullscreen(true);
+
+      if (window.screen?.orientation?.lock) {
+        await window.screen.orientation.lock('landscape').catch(() => {});
+      }
+      return;
     }
 
-    if (window.Telegram?.WebApp?.expand) {
-      window.Telegram.WebApp.expand();
-    }
-
+    // 3. Standard Browser Fullscreen (Outside Telegram Context)
     try {
       if (containerRef.current?.requestFullscreen) {
         await containerRef.current.requestFullscreen();
@@ -625,28 +646,17 @@ function getSortedVideoSources(sourcesList = []) {
       } else if (videoRef.current?.webkitEnterFullscreen) {
         videoRef.current.webkitEnterFullscreen();
         setIsFullscreen(true);
-      } else if (isInsideTelegram) {
+      } else {
         setIsFakeFullscreen(true);
         setIsFullscreen(true);
-        if (window.Telegram?.WebApp?.lockOrientation) {
-          try { window.Telegram.WebApp.lockOrientation(); } catch (e) {}
-        }
       }
       
       if (window.screen?.orientation?.lock) {
         await window.screen.orientation.lock('landscape').catch(() => {});
       }
     } catch (err) {
-      if (isInsideTelegram) {
-        setIsFakeFullscreen(true);
-        setIsFullscreen(true);
-        if (window.Telegram?.WebApp?.lockOrientation) {
-          try { window.Telegram.WebApp.lockOrientation(); } catch (e) {}
-        }
-      } else {
-        setIsFakeFullscreen(true);
-        setIsFullscreen(true);
-      }
+      setIsFakeFullscreen(true);
+      setIsFullscreen(true);
     }
   };
 

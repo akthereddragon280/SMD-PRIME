@@ -6,6 +6,7 @@ import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 import { getExactMovieDuration } from '../utils/posters';
 import { getOptimalStreamSource } from './SmartVideoPlayer';
+import { triggerIntentionalAd } from '../utils/adEngine';
 
 export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
   const [sources, setSources] = useState(movie?.sources || []);
@@ -185,6 +186,16 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
       handleDownloadClick(source);
       return;
     }
+
+    try {
+      const entitlement = getUserEntitlements(userRole, rolePolicies);
+      triggerIntentionalAd({
+        userRole: userRole,
+        enableAds: entitlement.enable_ads,
+        actionType: 'play'
+      });
+    } catch (e) {}
+
     if (onPlay) onPlay(movie, source);
   };
 
@@ -196,6 +207,14 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
       setTimeout(() => setShowUpgradeToast(null), 3500);
       return;
     }
+
+    try {
+      triggerIntentionalAd({
+        userRole: userRole,
+        enableAds: entitlement.enable_ads,
+        actionType: 'download'
+      });
+    } catch (e) {}
 
     const quality = source?.quality || '1080p';
     const fileId = source?.drive_file_id || movie.file_id;
