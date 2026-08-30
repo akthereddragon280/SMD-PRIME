@@ -150,7 +150,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   const [touchFeedback, setTouchFeedback] = useState(null);
   const [gestureHUD, setGestureHUD] = useState(null); // { type: 'brightness'|'volume'|'seek', value: string|number, timeFormatted?: string }
 
-  // Gesture Engine Refs
+  // Gesture Engine & Auto-Hide Refs
   const dragRef = useRef({
     startX: 0,
     startY: 0,
@@ -162,11 +162,27 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   });
   const hudTimeoutRef = useRef(null);
   const controlsTimeoutRef = useRef(null);
+  const externalMenuTimerRef = useRef(null);
 
   const speeds = [0.5, 1.0, 1.25, 1.5, 2.0];
 
   // Bind Telegram native BackButton
   useTelegramBackButton(onClose);
+
+  // 5-Second Auto-Hide Engine for External Player Popup
+  const handleOpenExternalClick = () => {
+    triggerHaptic('light');
+    if (showExternalMenu) {
+      setShowExternalMenu(false);
+      if (externalMenuTimerRef.current) clearTimeout(externalMenuTimerRef.current);
+    } else {
+      setShowExternalMenu(true);
+      if (externalMenuTimerRef.current) clearTimeout(externalMenuTimerRef.current);
+      externalMenuTimerRef.current = setTimeout(() => {
+        setShowExternalMenu(false);
+      }, 5000); // 5 Seconds Auto-Hide
+    }
+  };
 
   // Controls Auto-Fade Timer (Hides control bar cleanly after 3.5 seconds of inactivity)
   const resetControlsTimeout = () => {
@@ -1333,8 +1349,7 @@ function getSortedVideoSources(sourcesList = []) {
               className="col-span-3 h-full w-full bg-transparent cursor-ns-resize"
             />
           </div>
-
-          {/* Minimalist Frosted-Glass VLC Gesture HUD Overlay */}
+          {/* Minimalist Background-Less 2026 Gesture HUD Overlay (NO BLACK SQUARE BOX) */}
           <AnimatePresence>
             {gestureHUD && (
               <motion.div
@@ -1342,46 +1357,46 @@ function getSortedVideoSources(sourcesList = []) {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.85 }}
                 transition={{ duration: 0.12 }}
-                className="absolute z-40 inset-0 flex items-center justify-center pointer-events-none"
+                className="absolute z-40 inset-0 flex items-center justify-center pointer-events-none select-none"
               >
-                <div className="flex flex-col items-center gap-3 px-6 py-5 rounded-3xl bg-black/75 text-white border border-zinc-800 shadow-2xl backdrop-blur-xl min-w-[170px]">
+                <div className="flex flex-col items-center gap-1.5 drop-shadow-[0_4px_24px_rgba(0,0,0,0.95)]">
                   {gestureHUD.type === 'brightness' ? (
-                    <Sun className="w-10 h-10 text-amber-400 animate-pulse" />
+                    <Sun className="w-8 h-8 text-amber-400 animate-pulse drop-shadow-md" />
                   ) : gestureHUD.type === 'volume' ? (
                     gestureHUD.value === 0 ? (
-                      <VolumeX className="w-10 h-10 text-red-500" />
+                      <VolumeX className="w-8 h-8 text-red-500 drop-shadow-md" />
                     ) : (
-                      <Volume2 className="w-10 h-10 text-red-500 animate-pulse" />
+                      <Volume2 className="w-8 h-8 text-rose-500 animate-pulse drop-shadow-md" />
                     )
                   ) : (
-                    <Clock className="w-10 h-10 text-red-500 animate-pulse" />
+                    <Clock className="w-8 h-8 text-red-500 animate-pulse drop-shadow-md" />
                   )}
                   
-                  <div className="flex flex-col items-center gap-1.5 w-full text-center">
-                    <span className="text-[11px] font-mono font-extrabold uppercase tracking-widest text-zinc-400">
+                  <div className="flex flex-col items-center gap-1 text-center">
+                    <span className="text-[9px] font-mono font-black uppercase tracking-widest text-zinc-300 drop-shadow">
                       {gestureHUD.type === 'brightness' ? 'Brightness' : gestureHUD.type === 'volume' ? 'Volume' : 'Seek'}
                     </span>
                     
                     {gestureHUD.type === 'seek' ? (
                       <div className="flex flex-col items-center">
-                        <span className="text-2xl font-black text-white font-mono">
+                        <span className="text-xl font-black text-white font-mono drop-shadow">
                           {gestureHUD.value}
                         </span>
-                        <span className="text-xs font-mono font-bold text-red-400 mt-0.5">
+                        <span className="text-xs font-mono font-bold text-red-400 mt-0.5 drop-shadow">
                           {gestureHUD.timeFormatted}
                         </span>
                       </div>
                     ) : (
                       <>
-                        <span className="text-2xl font-black text-white font-mono">
+                        <span className="text-xl font-black text-white font-mono drop-shadow">
                           {gestureHUD.value}%
                         </span>
                         
-                        {/* HUD Progress Bar */}
-                        <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800 mt-1">
+                        {/* HUD Progress Bar (Clean Floating Bar) */}
+                        <div className="w-28 h-1.5 bg-white/20 rounded-full overflow-hidden shadow-inner mt-0.5">
                           <div
                             className={`h-full rounded-full transition-all duration-75 ${
-                              gestureHUD.type === 'brightness' ? 'bg-amber-400' : 'bg-red-600'
+                              gestureHUD.type === 'brightness' ? 'bg-gradient-to-r from-amber-500 to-yellow-300' : 'bg-gradient-to-r from-red-600 to-rose-500'
                             }`}
                             style={{
                               width: `${gestureHUD.type === 'brightness' ? Math.min(100, Math.max(0, ((gestureHUD.value - 20) / 130) * 100)) : Math.min(100, Math.max(0, gestureHUD.value))}%`
@@ -1398,7 +1413,7 @@ function getSortedVideoSources(sourcesList = []) {
 
           {/* Quick Action Touch Feedback Pill */}
           {touchFeedback && !gestureHUD && (
-            <div className="absolute z-30 px-4 py-2 rounded-2xl bg-zinc-900/90 text-white font-extrabold text-sm border border-zinc-700 shadow-2xl backdrop-blur-md animate-bounce pointer-events-none">
+            <div className="absolute z-30 px-5 py-2.5 rounded-full bg-[#07090e]/90 text-white font-extrabold text-xs border border-white/15 shadow-2xl backdrop-blur-md animate-bounce pointer-events-none">
               {touchFeedback}
             </div>
           )}
@@ -1520,7 +1535,7 @@ function getSortedVideoSources(sourcesList = []) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
               transition={{ duration: 0.2 }}
-              className="w-full z-40 p-3 sm:p-4 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex flex-col gap-2 pointer-events-auto"
+              className="w-full z-40 p-3 sm:p-4 bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col gap-2.5 pointer-events-auto select-none"
             >
               {/* Scrubbing Timeline Bar */}
               <div className="flex items-center gap-3 w-full">
@@ -1545,67 +1560,87 @@ function getSortedVideoSources(sourcesList = []) {
                 </span>
               </div>
 
-              {/* Player Buttons Bar */}
-              <div className="flex items-center justify-between pt-1">
+              {/* Player Bottom Row: Unified 1-Line Controls Toolbar (Mathematically Centered Pod & Equalized Height Buttons) */}
+              <div className="relative flex items-center justify-between w-full h-9 mt-0.5">
                 
-                {/* Playback Controls Group */}
-                <div className="flex items-center gap-3">
+                {/* Left Controls Group (Volume Slider & Mute Toggle) */}
+                <div className="flex items-center gap-2 z-10">
                   <button
-                    onClick={togglePlay}
-                    className="p-2 rounded-xl bg-red-600 hover:bg-red-700 text-white shadow-lg active:scale-95 transition-all"
+                    onClick={toggleMute}
+                    className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 flex items-center justify-center transition-all active:scale-95 cursor-pointer"
+                    title={isMuted ? "Unmute Stream" : "Mute Stream"}
                   >
-                    {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
+                    {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-red-500" /> : <Volume2 className="w-4 h-4 text-zinc-300" />}
                   </button>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={isMuted ? 0 : volume}
+                    onChange={handleVolumeChange}
+                    className="w-16 sm:w-20 h-1 rounded-lg appearance-none cursor-pointer accent-red-600 transition-all hidden sm:block"
+                    style={{
+                      background: `linear-gradient(to right, #dc2626 ${volumePercent}%, #334155 ${volumePercent}%)`
+                    }}
+                  />
+                </div>
 
-                  <button
-                    onClick={() => skipTime(-10)}
-                    className="p-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 active:scale-95"
-                    title="Rewind 10s"
-                  >
-                    <Rewind className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={() => skipTime(10)}
-                    className="p-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 active:scale-95"
-                    title="Forward 10s"
-                  >
-                    <FastForward className="w-4 h-4" />
-                  </button>
-
-                  {/* Volume Slider & Mute Toggle */}
-                  <div className="flex items-center gap-2 hidden sm:flex">
-                    <button onClick={toggleMute} className="text-zinc-400 hover:text-white">
-                      {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-red-500" /> : <Volume2 className="w-4 h-4" />}
-                    </button>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={isMuted ? 0 : volume}
-                      onChange={handleVolumeChange}
-                      className="w-20 h-1 rounded-lg appearance-none cursor-pointer accent-red-600 transition-all"
-                      style={{
-                        background: `linear-gradient(to right, #dc2626 ${volumePercent}%, #334155 ${volumePercent}%)`
+                {/* Mathematically Centered Playback Micro Pod */}
+                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-auto">
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#07090e]/90 backdrop-blur-2xl border border-white/15 shadow-[0_4px_20px_rgba(0,0,0,0.8)]">
+                    {/* Rewind 10s */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        skipTime(-10);
                       }}
-                    />
+                      className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/10 flex items-center justify-center active:scale-90 transition-all cursor-pointer"
+                      title="Rewind 10 Seconds"
+                    >
+                      <Rewind className="w-3.5 h-3.5 fill-current" />
+                    </button>
+
+                    {/* Play / Pause Micro Hero Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        togglePlay();
+                      }}
+                      className="w-8 h-8 rounded-full bg-gradient-to-tr from-red-600 to-rose-500 hover:from-red-500 hover:to-rose-400 text-white shadow-[0_0_15px_rgba(225,29,72,0.6)] flex items-center justify-center active:scale-95 transition-all relative group cursor-pointer"
+                      title={isPlaying ? 'Pause Stream' : 'Play Stream'}
+                    >
+                      <div className="absolute -inset-0.5 rounded-full bg-red-500/30 animate-ping pointer-events-none opacity-40" />
+                      {isPlaying ? (
+                        <Pause className="w-4 h-4 fill-current relative z-10" />
+                      ) : (
+                        <Play className="w-4 h-4 fill-current ml-0.5 relative z-10" />
+                      )}
+                    </button>
+
+                    {/* Fast Forward 10s */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        skipTime(10);
+                      }}
+                      className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/10 flex items-center justify-center active:scale-90 transition-all cursor-pointer"
+                      title="Forward 10 Seconds"
+                    >
+                      <FastForward className="w-3.5 h-3.5 fill-current" />
+                    </button>
                   </div>
                 </div>
 
-                {/* Right Controls Group (External Player Launch & Fullscreen) */}
-                <div className="flex items-center gap-2 relative">
-                  {/* Quick External Player Launcher Button */}
+                {/* Right Controls Group (Equalized Height OPEN Badge & Fullscreen) */}
+                <div className="flex items-center gap-2 relative z-10">
+                  {/* OPEN Launcher Button (Equalized Height h-8) */}
                   <button
-                    onClick={() => {
-                      triggerHaptic('light');
-                      setShowExternalMenu(!showExternalMenu);
-                    }}
-                    className="p-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-red-500/20 hover:from-amber-500/30 hover:to-red-500/30 text-amber-400 border border-amber-500/40 flex items-center gap-1.5 active:scale-95 transition-all shadow-lg backdrop-blur-md"
-                    title="Play in External App (VLC / MX Player)"
+                    onClick={handleOpenExternalClick}
+                    className="h-8 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/35 active:scale-95 transition-all shadow-md backdrop-blur-md cursor-pointer flex items-center justify-center"
+                    title="Open in External Player"
                   >
-                    <ExternalLink className="w-4 h-4 stroke-[2.5]" />
-                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-300">EXT</span>
+                    <span className="text-[11px] font-mono font-black uppercase tracking-wider text-amber-300">OPEN</span>
                   </button>
 
                   {/* Floating Micro External Player Menu */}
@@ -1615,26 +1650,17 @@ function getSortedVideoSources(sourcesList = []) {
                         initial={{ opacity: 0, y: 10, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute bottom-12 right-0 w-64 p-3 rounded-2xl bg-zinc-950/95 border border-white/10 shadow-2xl backdrop-blur-2xl z-50 space-y-1.5"
+                        className="absolute bottom-11 right-0 min-w-[200px] z-50 pointer-events-auto"
                       >
-                        <div className="flex items-center justify-end pb-1 border-b border-white/10">
-                          <button
-                            onClick={() => setShowExternalMenu(false)}
-                            className="text-zinc-400 hover:text-white p-0.5 rounded-lg flex items-center gap-1 text-[10px] font-mono"
-                          >
-                            <span>Close</span>
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
                         <ExternalPlayerMenu streamUrl={activeVideoUrl} movieTitle={movieTitle} variant="compact" onExternalPlayTriggered={handleExternalPlayTriggered} />
                       </motion.div>
                     )}
                   </AnimatePresence>
 
-                  {/* Fullscreen Button */}
+                  {/* Fullscreen Button (Equalized Height h-8) */}
                   <button
                     onClick={toggleFullscreen}
-                    className="p-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 active:scale-95"
+                    className="w-8 h-8 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 flex items-center justify-center active:scale-95 cursor-pointer"
                     title="Toggle Fullscreen"
                   >
                     {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}

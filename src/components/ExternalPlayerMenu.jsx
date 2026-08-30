@@ -170,86 +170,64 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
       });
   };
 
-  // Compact Variant for Micro Popovers (Horizontal 4-Option Grid under "PLAY WITH")
+  // Compact Variant for Micro Popovers (Horizontal 4-Option Grid under "OPEN") -> LOGO ONLY (STRICTLY NO TEXT)
   if (variant === 'compact') {
     return (
-      <div className="w-full space-y-2.5 font-sans relative">
-        <div className="text-[10px] font-mono font-black uppercase tracking-widest text-amber-400 text-center">
-          PLAY WITH
-        </div>
-
-        {/* 4 Options Grid: VLC, MX, Default, Copy */}
-        <div className="grid grid-cols-4 gap-1.5">
-          {/* 1. VLC Player */}
+      <div className="w-full font-sans relative select-none">
+        {/* 4 Options Grid: VLC, MX, System Default, Copy Link (LOGO ONLY) */}
+        <div className="flex items-center justify-around gap-2 p-1.5 rounded-2xl bg-[#07090e]/95 border border-white/15 backdrop-blur-2xl shadow-[0_10px_30px_rgba(0,0,0,0.9)]">
+          {/* 1. VLC Player Logo */}
           <a
             href={urls.vlcIntent}
             onClick={(e) => handleLaunchPlayer(e, 'vlc')}
-            className="flex flex-col items-center justify-center p-2 rounded-2xl bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 transition-all active:scale-95 group shadow-md cursor-pointer"
-            title="Play in VLC Player"
+            className="p-2 rounded-xl hover:bg-amber-500/20 active:scale-90 transition-all cursor-pointer group"
+            title="VLC Player"
           >
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-              <VlcIcon className="w-7 h-7" />
-            </div>
-            <span className="text-[9px] font-extrabold text-white mt-1 group-hover:text-amber-300">VLC</span>
+            <VlcIcon className="w-8 h-8 group-hover:scale-110 transition-transform drop-shadow-[0_4px_10px_rgba(255,136,0,0.5)]" />
           </a>
 
-          {/* 2. MX Player */}
+          {/* 2. MX Player Logo */}
           <a
             href={urls.mxIntent}
             onClick={(e) => handleLaunchPlayer(e, 'mx')}
-            className="flex flex-col items-center justify-center p-2 rounded-2xl bg-blue-500/10 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 transition-all active:scale-95 group shadow-md cursor-pointer"
-            title="Play in MX Player"
+            className="p-2 rounded-xl hover:bg-blue-500/20 active:scale-90 transition-all cursor-pointer group"
+            title="MX Player"
           >
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-              <MxPlayerIcon className="w-7 h-7" />
-            </div>
-            <span className="text-[9px] font-extrabold text-white mt-1 group-hover:text-blue-300">MX</span>
+            <MxPlayerIcon className="w-8 h-8 group-hover:scale-110 transition-transform drop-shadow-[0_4px_10px_rgba(0,102,255,0.5)]" />
           </a>
 
-          {/* 3. System Default */}
+          {/* 3. System Default Player Logo */}
           <a
             href={urls.systemIntent}
             onClick={(e) => handleLaunchPlayer(e, 'system')}
-            className="flex flex-col items-center justify-center p-2 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 transition-all active:scale-95 group shadow-md cursor-pointer"
-            title="Play in System Default Player"
+            className="p-2 rounded-xl hover:bg-emerald-500/20 active:scale-90 transition-all cursor-pointer group"
+            title="System Default Player"
           >
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-              <SystemPlayerIcon className="w-7 h-7" />
-            </div>
-            <span className="text-[9px] font-extrabold text-white mt-1 group-hover:text-emerald-300">Default</span>
+            <SystemPlayerIcon className="w-8 h-8 group-hover:scale-110 transition-transform drop-shadow-[0_4px_10px_rgba(16,185,129,0.5)]" />
           </a>
 
-          {/* 4. Copy Link Fallback Button */}
+          {/* 4. Copy Link Fallback Icon */}
           <button
             onClick={handleCopyLink}
-            className="flex flex-col items-center justify-center p-2 rounded-2xl bg-purple-500/10 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 transition-all active:scale-95 group shadow-md cursor-pointer"
+            className="p-2 rounded-xl hover:bg-purple-500/20 active:scale-90 transition-all cursor-pointer group"
             title="Copy Direct Stream Link"
           >
-            <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 group-hover:scale-110 transition-transform">
-              {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-purple-300" />}
+            <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 group-hover:scale-110 transition-transform shadow-inner">
+              {copied ? <Check className="w-5 h-5 text-emerald-400 animate-bounce" /> : <Copy className="w-4 h-4 text-purple-300" />}
             </div>
-            <span className="text-[9px] font-extrabold text-white mt-1 group-hover:text-purple-300">
-              {copied ? 'Copied' : 'Copy'}
-            </span>
           </button>
         </div>
-
-        {/* Copy Toast Feedback Notice */}
-        {copied && (
-          <div className="p-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[9px] font-mono text-center animate-fadeIn shadow-lg">
-            ✨ Stream Link Copied! Paste into VLC Network Stream.
-          </div>
-        )}
       </div>
     );
   }
 
   // Default Full Variant (for Settings / Standalone)
   return (
-    <div className="w-full space-y-3 font-sans">
-      <div className="p-4 rounded-2xl border border-white/10 bg-zinc-950/95 backdrop-blur-xl space-y-3 animate-fadeIn shadow-2xl">
-        <div className="text-[11px] font-mono font-bold uppercase tracking-widest text-amber-400 border-b border-white/10 pb-2 text-center">
-          PLAY WITH EXTERNAL PLAYER
+    <div className="w-full space-y-3 font-sans select-none">
+      <div className="p-4 rounded-3xl border border-white/10 bg-[#07090e]/95 backdrop-blur-2xl space-y-3.5 animate-fadeIn shadow-[0_20px_50px_rgba(0,0,0,0.9)]">
+        <div className="text-[10px] font-mono font-black uppercase tracking-widest text-amber-400 border-b border-white/10 pb-2.5 text-center flex items-center justify-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          <span>OPEN WITH EXTERNAL PLAYER</span>
         </div>
 
         <div className="grid grid-cols-1 gap-2.5">
@@ -257,76 +235,76 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
           <a
             href={urls.vlcIntent}
             onClick={(e) => handleLaunchPlayer(e, 'vlc')}
-            className="flex items-center justify-between p-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all active:scale-[0.98] group cursor-pointer"
+            className="flex items-center justify-between p-3.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all active:scale-[0.98] group cursor-pointer shadow-md"
           >
-            <div className="flex items-center gap-3">
-              <VlcIcon className="w-8 h-8 group-hover:scale-105 transition-transform" />
+            <div className="flex items-center gap-3.5">
+              <VlcIcon className="w-9 h-9 group-hover:scale-110 transition-transform drop-shadow-[0_4px_12px_rgba(255,136,0,0.5)]" />
               <div>
                 <div className="text-xs font-black text-white group-hover:text-amber-300 transition-colors">
                   Play in VLC Player
                 </div>
-                <div className="text-[10px] font-mono text-amber-400/80">
+                <div className="text-[10px] font-mono text-amber-400/80 mt-0.5">
                   Recommended for 4K / HEVC HDR
                 </div>
               </div>
             </div>
-            <Play className="w-4 h-4 text-amber-400 fill-current group-hover:translate-x-0.5 transition-transform" />
+            <Play className="w-4 h-4 text-amber-400 fill-current group-hover:translate-x-1 transition-transform" />
           </a>
 
           {/* 2. MX Player */}
           <a
             href={urls.mxIntent}
             onClick={(e) => handleLaunchPlayer(e, 'mx')}
-            className="flex items-center justify-between p-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 transition-all active:scale-[0.98] group cursor-pointer"
+            className="flex items-center justify-between p-3.5 rounded-2xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 transition-all active:scale-[0.98] group cursor-pointer shadow-md"
           >
-            <div className="flex items-center gap-3">
-              <MxPlayerIcon className="w-8 h-8 group-hover:scale-105 transition-transform" />
+            <div className="flex items-center gap-3.5">
+              <MxPlayerIcon className="w-9 h-9 group-hover:scale-110 transition-transform drop-shadow-[0_4px_12px_rgba(0,102,255,0.5)]" />
               <div>
                 <div className="text-xs font-black text-white group-hover:text-blue-300 transition-colors">
                   Play in MX Player (Android)
                 </div>
-                <div className="text-[10px] font-mono text-blue-400/80">
+                <div className="text-[10px] font-mono text-blue-400/80 mt-0.5">
                   Hardware accelerated SW/HW decoding
                 </div>
               </div>
             </div>
-            <Play className="w-4 h-4 text-blue-400 fill-current group-hover:translate-x-0.5 transition-transform" />
+            <Play className="w-4 h-4 text-blue-400 fill-current group-hover:translate-x-1 transition-transform" />
           </a>
 
           {/* 3. System Default Player */}
           <a
             href={urls.systemIntent}
             onClick={(e) => handleLaunchPlayer(e, 'system')}
-            className="flex items-center justify-between p-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 transition-all active:scale-[0.98] group cursor-pointer"
+            className="flex items-center justify-between p-3.5 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 transition-all active:scale-[0.98] group cursor-pointer shadow-md"
           >
-            <div className="flex items-center gap-3">
-              <SystemPlayerIcon className="w-8 h-8 group-hover:scale-105 transition-transform" />
+            <div className="flex items-center gap-3.5">
+              <SystemPlayerIcon className="w-9 h-9 group-hover:scale-110 transition-transform drop-shadow-[0_4px_12px_rgba(16,185,129,0.5)]" />
               <div>
                 <div className="text-xs font-black text-white group-hover:text-emerald-300 transition-colors">
                   Play in System Default Player
                 </div>
-                <div className="text-[10px] font-mono text-emerald-400/80">
-                  Opens Android "Open with..." bottom sheet
+                <div className="text-[10px] font-mono text-emerald-400/80 mt-0.5">
+                  Opens Android / iOS native player chooser
                 </div>
               </div>
             </div>
-            <Tv className="w-4 h-4 text-emerald-400 group-hover:translate-x-0.5 transition-transform" />
+            <Tv className="w-4 h-4 text-emerald-400 group-hover:translate-x-1 transition-transform" />
           </a>
 
           {/* 4. Copy Stream Link Button */}
           <button
             onClick={handleCopyLink}
-            className="flex items-center justify-between p-3 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 transition-all active:scale-[0.98] group cursor-pointer w-full text-left"
+            className="flex items-center justify-between p-3.5 rounded-2xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 transition-all active:scale-[0.98] group cursor-pointer w-full text-left shadow-md"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 group-hover:scale-105 transition-transform">
-                {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-purple-300" />}
+            <div className="flex items-center gap-3.5">
+              <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 group-hover:scale-110 transition-transform shadow-inner">
+                {copied ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5 text-purple-300" />}
               </div>
               <div>
                 <div className="text-xs font-black text-white group-hover:text-purple-300 transition-colors">
                   {copied ? 'Link Copied to Clipboard!' : 'Copy Direct Stream Link'}
                 </div>
-                <div className="text-[10px] font-mono text-purple-400/80">
+                <div className="text-[10px] font-mono text-purple-400/80 mt-0.5">
                   {copied ? 'Paste into VLC Media -> Open Network Stream' : 'Copy link for manual player entry'}
                 </div>
               </div>
@@ -337,8 +315,8 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
 
         {/* Disclaimer text */}
         <div className="pt-1 text-center">
-          <p className="text-[10px] font-mono text-zinc-500 flex items-center justify-center gap-1">
-            <ShieldCheck className="w-3 h-3 text-zinc-600 inline" />
+          <p className="text-[10px] font-mono text-zinc-400 flex items-center justify-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-zinc-500 inline" />
             <span>Note: Ensure external player app is installed on your device.</span>
           </p>
         </div>
