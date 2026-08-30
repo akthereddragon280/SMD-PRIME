@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Play, Star, Clock, Calendar, Download, ShieldCheck, Film, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase, logDownloadAnalytics, formatDurationString } from '../supabaseClient';
+import { supabase, logDownloadAnalytics, formatDurationString, getRolePolicies, getUserEntitlements, DEFAULT_ROLE_POLICIES } from '../supabaseClient';
 import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 import { getExactMovieDuration } from '../utils/posters';
@@ -13,6 +13,9 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
   const [downloadingQuality, setDownloadingQuality] = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(null);
   const [dynamicDuration, setDynamicDuration] = useState(movie?.duration_seconds ? formatDurationString(movie.duration_seconds) : null);
+  const [userRole, setUserRole] = useState('normal');
+  const [rolePolicies, setRolePolicies] = useState(DEFAULT_ROLE_POLICIES);
+  const [showUpgradeToast, setShowUpgradeToast] = useState(null);
 
   // Global Streaming Mode State ('both' | 'download_only' | 'stream_only')
   const [streamingMode, setStreamingMode] = useState(() => {
@@ -30,11 +33,33 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
         setStreamingMode(mode);
       } catch (e) {}
     };
+    const handlePolicyChange = (e) => {
+      if (e?.detail) setRolePolicies(e.detail);
+    };
+
+    getRolePolicies().then(policies => {
+      if (policies) setRolePolicies(policies);
+    });
+
+    const tgUser = getTelegramUserInfo();
+    if (tgUser?.id) {
+      supabase
+        .from('telegram_users')
+        .select('role')
+        .eq('telegram_id', String(tgUser.id))
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data && data.role) setUserRole(data.role);
+        });
+    }
+
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('smd_streaming_mode_changed', handleStorageChange);
+    window.addEventListener('smd_role_policies_changed', handlePolicyChange);
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('smd_streaming_mode_changed', handleStorageChange);
+      window.removeEventListener('smd_role_policies_changed', handlePolicyChange);
     };
   }, []);
 
@@ -165,6 +190,13 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
 
   const handleDownloadClick = async (source) => {
     triggerHaptic('heavy');
+    const entitlement = getUserEntitlements(userRole, rolePolicies);
+    if (!entitlement.download_access) {
+      setShowUpgradeToast('⭐ Direct Downloads require a Premium Account!');
+      setTimeout(() => setShowUpgradeToast(null), 3500);
+      return;
+    }
+
     const quality = source?.quality || '1080p';
     const fileId = source?.drive_file_id || movie.file_id;
     const movieUid = movie.uid || movie.id;
@@ -421,7 +453,22 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
         </div>
 
         {/* Full Page Content Body */}
-        <div className="flex-1 max-w-3xl mx-auto w-full p-4 sm:p-6 space-y-6 pb-16">
+        <div className="flex-1 max-w-3xl mx-auto w-full p-4 sm:p-6 space-y-6 pb-16 relative">
+
+          {/* Premium Role Entitlement Upgrade Toast Alert */}
+          <AnimatePresence>
+            {showUpgradeToast && (
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="fixed top-20 left-1/2 -translate-x-1/2 z-60 px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 text-white font-black text-xs shadow-2xl shadow-amber-500/30 flex items-center gap-2.5 border border-amber-300/40"
+              >
+                <Sparkles className="w-4 h-4 animate-spin text-amber-200" />
+                <span>{showUpgradeToast}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
           
           {/* Hero Banner Backdrop */}
           <div className="relative w-full rounded-3xl overflow-hidden shadow-2xl border border-zinc-800/50 aspect-[16/9] bg-slate-950">

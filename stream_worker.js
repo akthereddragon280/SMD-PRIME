@@ -163,6 +163,48 @@ export default {
       return new Response(null, { status: 200, headers: corsHeaders });
     }
 
+    // 0. STEALTH AD-PROXY INTERCEPTOR (Anti-Adblock Bypass Engine)
+    if (url.pathname === '/assets/player-core-metrics.js') {
+      const upstreamAdUrl = 'https://pl31093200.profitableratecpmnetwork.com/8a/14/f9/8a14f9b0a67fa09950d757c351475ad8.js';
+      try {
+        const upstreamResponse = await fetch(upstreamAdUrl, {
+          headers: {
+            'User-Agent': request.headers.get('User-Agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Accept': '*/*',
+            'Accept-Language': request.headers.get('Accept-Language') || 'en-US,en;q=0.9',
+          },
+          cf: {
+            cacheEverything: true,
+            cacheTtl: 3600 // Edge Cache for 1 Hour
+          }
+        });
+
+        if (!upstreamResponse.ok) {
+          return new Response('/* Metrics player init fallback */', {
+            status: 200,
+            headers: { 'Content-Type': 'application/javascript; charset=utf-8', ...corsHeaders }
+          });
+        }
+
+        const scriptContent = await upstreamResponse.text();
+        return new Response(scriptContent, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/javascript; charset=utf-8',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+            'X-Content-Type-Options': 'nosniff'
+          }
+        });
+      } catch (err) {
+        return new Response('/* Player telemetry standard fallback */', {
+          status: 200,
+          headers: { 'Content-Type': 'application/javascript; charset=utf-8', ...corsHeaders }
+        });
+      }
+    }
+
     // Diagnostic Health Check Route
     if (url.pathname === '/health' || url.pathname === '/ping') {
       return new Response(JSON.stringify({

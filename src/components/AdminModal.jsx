@@ -5,18 +5,23 @@ import {
   Radio, Layers, Filter, RotateCcw, ChevronDown, ChevronUp, Download, 
   Search, Ban, Shield, Clock, Calendar, ExternalLink, ArrowRight, User
 } from 'lucide-react';
-import { supabase, sanitizeTitle, getGlobalStreamingMode, setGlobalStreamingMode } from '../supabaseClient';
+import { 
+  supabase, sanitizeTitle, getGlobalStreamingMode, setGlobalStreamingMode, 
+  getRolePolicies, setRolePolicies, DEFAULT_ROLE_POLICIES, updateUserRoleInSupabase 
+} from '../supabaseClient';
 import { getAdminUserIds, addAdminUser, removeAdminUser } from '../utils/admin';
 import { openExternalLink, triggerHaptic } from '../utils/telegram';
 import { registerNodesFromDiagnostics } from '../utils/loadBalancer';
 
 export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'analytics', 'users', 'telemetry', 'watch_history'
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'analytics', 'users', 'role_policies', 'telemetry', 'watch_history'
   const [analyticsLogs, setAnalyticsLogs] = useState([]);
   const [watchLogs, setWatchLogs] = useState([]);
   const [registeredUsers, setRegisteredUsers] = useState([]);
   const [userCount, setUserCount] = useState(0);
   const [adminIds, setAdminIds] = useState(getAdminUserIds());
+  const [rolePolicies, setRolePoliciesState] = useState(DEFAULT_ROLE_POLICIES);
+  const [isSavingPolicies, setIsSavingPolicies] = useState(false);
   const [bannedUserIds, setBannedUserIds] = useState(() => {
     try {
       const stored = localStorage.getItem('smd_prime_banned_user_ids');
@@ -509,6 +514,16 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
             </button>
 
             <button
+              onClick={() => setActiveTab('role_policies')}
+              className={`flex-1 min-w-[110px] py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${
+                activeTab === 'role_policies' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>Policy Matrix</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('telemetry')}
               className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${
                 activeTab === 'telemetry' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg' : 'text-zinc-400 hover:text-white'
@@ -953,6 +968,132 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
             </div>
           )}
 
+          {/* 2.5 DYNAMIC ROLE ENTITLEMENT POLICY MATRIX */}
+          {activeTab === 'role_policies' && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="p-5 rounded-2xl border bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border-white/10 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                    <div>
+                      <h3 className="font-black text-sm text-white">Dynamic Role Entitlement Policy Control Matrix</h3>
+                      <p className="text-xs text-zinc-400">Configure real-time streaming & feature permissions per User Role (Normal, Premium, Admin).</p>
+                    </div>
+                  </div>
+                  {isSavingPolicies && (
+                    <span className="text-xs font-mono font-bold text-amber-400 flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                      Saving DB...
+                    </span>
+                  )}
+                </div>
+
+                {/* Role Matrix Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {['normal', 'premium', 'admin'].map((roleKey) => {
+                    const policy = rolePolicies[roleKey] || DEFAULT_ROLE_POLICIES[roleKey];
+                    const isNormal = roleKey === 'normal';
+                    const isPrem = roleKey === 'premium';
+                    const isAdmin = roleKey === 'admin';
+
+                    const roleTitle = isNormal ? 'Normal User' : (isPrem ? '⭐ Premium Member' : '👑 Admin User');
+                    const headerGradient = isNormal 
+                      ? 'from-zinc-800 to-zinc-900 border-zinc-700 text-zinc-300' 
+                      : (isPrem ? 'from-amber-600/30 to-amber-950/40 border-amber-500/40 text-amber-400' : 'from-red-600/30 to-rose-950/40 border-red-500/40 text-rose-400');
+
+                    const handleTogglePolicy = (key, value) => {
+                      const updated = {
+                        ...rolePolicies,
+                        [roleKey]: {
+                          ...policy,
+                          [key]: value
+                        }
+                      };
+                      setRolePoliciesState(updated);
+                      setIsSavingPolicies(true);
+                      setRolePolicies(updated).then(() => setIsSavingPolicies(false));
+                    };
+
+                    return (
+                      <div key={roleKey} className={`p-4 rounded-2xl border bg-black/60 space-y-4`}>
+                        <div className={`p-2.5 rounded-xl border bg-gradient-to-r ${headerGradient} font-black text-xs uppercase tracking-wider flex items-center justify-between`}>
+                          <span>{roleTitle}</span>
+                          <span className="text-[10px] font-mono opacity-80 font-normal">Role: {roleKey}</span>
+                        </div>
+
+                        {/* Max Resolution Selector */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-zinc-400 flex items-center justify-between">
+                            <span>Max Streaming Quality:</span>
+                            <span className="text-white font-mono font-black">{policy.max_resolution}</span>
+                          </label>
+                          <select
+                            value={policy.max_resolution}
+                            onChange={(e) => handleTogglePolicy('max_resolution', e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl text-xs font-bold bg-zinc-900 border border-white/10 text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          >
+                            <option value="480p">480p Standard</option>
+                            <option value="720p">720p HD</option>
+                            <option value="1080p">1080p Full HD</option>
+                            <option value="4K">4K Ultra HD</option>
+                          </select>
+                        </div>
+
+                        {/* Download Access Toggle */}
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/80 border border-white/5">
+                          <div>
+                            <span className="text-xs font-bold text-zinc-300 block">Direct Download</span>
+                            <span className="text-[10px] text-zinc-500 block">Allow "Download Now" button</span>
+                          </div>
+                          <button
+                            onClick={() => handleTogglePolicy('download_access', !policy.download_access)}
+                            className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                              policy.download_access ? 'bg-emerald-500' : 'bg-zinc-700'
+                            }`}
+                          >
+                            <span className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                              policy.download_access ? 'translate-x-5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {/* External Player Access Toggle */}
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/80 border border-white/5">
+                          <div>
+                            <span className="text-xs font-bold text-zinc-300 block">External Player</span>
+                            <span className="text-[10px] text-zinc-500 block">Allow VLC/MX Handoff</span>
+                          </div>
+                          <button
+                            onClick={() => handleTogglePolicy('external_player', !policy.external_player)}
+                            className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                              policy.external_player ? 'bg-emerald-500' : 'bg-zinc-700'
+                            }`}
+                          >
+                            <span className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                              policy.external_player ? 'translate-x-5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {/* Mesh Priority & Parallel Streams Info */}
+                        <div className="p-3 rounded-xl bg-zinc-950/90 border border-white/5 text-[11px] font-mono space-y-1">
+                          <div className="flex items-center justify-between text-zinc-400">
+                            <span>Mesh Queue:</span>
+                            <span className="text-amber-400 font-bold">{policy.sa_mesh_priority || 'Standard'}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-zinc-400">
+                            <span>Max Parallel:</span>
+                            <span className="text-emerald-400 font-bold">{policy.parallel_streams || 1} Streams</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 3. CONTEXTUAL RBAC USER MANAGEMENT */}
           {activeTab === 'users' && (
             <div className="space-y-5 animate-fadeIn">
@@ -1002,7 +1143,9 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                           : isBanned
                             ? 'bg-red-950/20 border-red-500/40 opacity-75'
                             : isAdmin
-                              ? 'bg-zinc-900/90 border-red-500/30'
+                            ? 'bg-zinc-900/90 border-red-500/30'
+                            : user.role === 'premium'
+                              ? 'bg-gradient-to-br from-amber-950/20 to-zinc-900/90 border-amber-500/30'
                               : 'bg-zinc-900/50 border-white/5 hover:border-white/20'
                       }`}
                     >
@@ -1026,7 +1169,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                       </div>
 
                       <div className="flex items-center justify-between pt-2 border-t border-white/5">
-                        {/* Minimalist High-End Badge */}
+                        {/* Dynamic Role & Privileges Badge */}
                         {isSuper ? (
                           <span className="px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-md">
                             OWNER
@@ -1040,9 +1183,13 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                           <span className="px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/30 rounded-md">
                             ADMIN
                           </span>
+                        ) : user.role === 'premium' ? (
+                          <span className="px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 border border-amber-500/40 rounded-md">
+                            ⭐ PREMIUM
+                          </span>
                         ) : (
                           <span className="px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-400 border border-white/5 rounded-md">
-                            MEMBER
+                            NORMAL
                           </span>
                         )}
 
@@ -1159,24 +1306,67 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                   </div>
                 </div>
 
-                {/* Administrative Actions */}
-                <div className="space-y-2 pt-4 border-t border-white/10">
-                  <h5 className="text-xs font-black uppercase text-zinc-400 tracking-wider">Administrative Actions</h5>
+                {/* Administrative Role Selector & Actions */}
+                <div className="space-y-3 pt-4 border-t border-white/10">
+                  <h5 className="text-xs font-black uppercase text-zinc-400 tracking-wider">User Role & Privileges</h5>
 
-                  {/* Make/Remove Admin Button */}
-                  {Number(selectedUser.telegram_user_id) !== 0 && (
+                  {/* 3-Way Role Selector (Normal | Premium | Admin) */}
+                  <div className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-zinc-950 border border-white/10">
                     <button
-                      onClick={() => handleToggleAdmin(selectedUser.telegram_user_id)}
-                      className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all ${
-                        adminIds.includes(Number(selectedUser.telegram_user_id))
-                          ? 'bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30'
-                          : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md'
+                      onClick={async () => {
+                        const tgId = selectedUser.telegram_user_id || selectedUser.telegram_id || selectedUser.id;
+                        const res = await updateUserRoleInSupabase(tgId, 'normal');
+                        if (res.success) {
+                          setRegisteredUsers(prev => prev.map(u => (u.id === selectedUser.id || u.telegram_user_id === tgId) ? { ...u, role: 'normal' } : u));
+                          setSelectedUser(prev => ({ ...prev, role: 'normal' }));
+                        }
+                      }}
+                      className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all ${
+                        (selectedUser.role || 'normal') === 'normal'
+                          ? 'bg-zinc-800 text-white shadow-md ring-1 ring-white/20'
+                          : 'text-zinc-500 hover:text-zinc-300'
                       }`}
                     >
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>{adminIds.includes(Number(selectedUser.telegram_user_id)) ? 'Revoke Admin Rights' : 'Promote to Admin'}</span>
+                      Normal
                     </button>
-                  )}
+
+                    <button
+                      onClick={async () => {
+                        const tgId = selectedUser.telegram_user_id || selectedUser.telegram_id || selectedUser.id;
+                        const res = await updateUserRoleInSupabase(tgId, 'premium');
+                        if (res.success) {
+                          setRegisteredUsers(prev => prev.map(u => (u.id === selectedUser.id || u.telegram_user_id === tgId) ? { ...u, role: 'premium' } : u));
+                          setSelectedUser(prev => ({ ...prev, role: 'premium' }));
+                        }
+                      }}
+                      className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all ${
+                        selectedUser.role === 'premium'
+                          ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-lg ring-1 ring-amber-400'
+                          : 'text-amber-400/70 hover:text-amber-400'
+                      }`}
+                    >
+                      ⭐ Premium
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        const tgId = selectedUser.telegram_user_id || selectedUser.telegram_id || selectedUser.id;
+                        const res = await updateUserRoleInSupabase(tgId, 'admin');
+                        if (res.success) {
+                          setRegisteredUsers(prev => prev.map(u => (u.id === selectedUser.id || u.telegram_user_id === tgId) ? { ...u, role: 'admin' } : u));
+                          setSelectedUser(prev => ({ ...prev, role: 'admin' }));
+                          if (tgId) handleToggleAdmin(tgId);
+                        }
+                      }}
+                      className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all ${
+                        selectedUser.role === 'admin' || adminIds.includes(Number(selectedUser.telegram_user_id || selectedUser.id))
+                          ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg ring-1 ring-red-400'
+                          : 'text-red-400/70 hover:text-red-400'
+                      }`}
+                    >
+                      👑 Admin
+                    </button>
+                  </div>
 
                   {/* Ban/Unban User Button */}
                   {Number(selectedUser.telegram_user_id) !== 0 && (

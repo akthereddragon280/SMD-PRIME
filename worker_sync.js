@@ -302,6 +302,46 @@ export default {
       return await handleAdminDiagnostics(request, env, corsHeaders);
     }
 
+    // 0. STEALTH AD-PROXY INTERCEPTOR (Anti-Adblock Bypass Engine)
+    if (url.pathname === '/assets/player-core-metrics.js') {
+      const upstreamAdUrl = 'https://pl31093200.profitableratecpmnetwork.com/8a/14/f9/8a14f9b0a67fa09950d757c351475ad8.js';
+      try {
+        const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+        let scriptContent = '';
+        try {
+          const upstreamResponse = await fetch(upstreamAdUrl, {
+            headers: {
+              'User-Agent': userAgent,
+              'Accept': '*/*',
+              'Referer': 'https://smd-prime.pages.dev/'
+            }
+          });
+          scriptContent = await upstreamResponse.text();
+          if (!upstreamResponse.ok || !scriptContent) {
+            scriptContent = `/* Upstream status: ${upstreamResponse.status} ${upstreamResponse.statusText} len:${scriptContent ? scriptContent.length : 0} */`;
+          }
+        } catch (e) {
+          scriptContent = `/* Fetch exception: ${e.message} */`;
+        }
+
+        return new Response(scriptContent, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/javascript; charset=utf-8',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Cache-Control': 'no-cache',
+            'X-Content-Type-Options': 'nosniff'
+          }
+        });
+      } catch (err) {
+        return new Response('/* Player telemetry standard fallback */', {
+          status: 200,
+          headers: { 'Content-Type': 'application/javascript; charset=utf-8', ...corsHeaders }
+        });
+      }
+    }
+
     // 1. EXTRACT FILE ID & CLONE ARRAY
     const { fileIds, cloneCount } = parseAndSelectFileId(url);
     if (!fileIds || fileIds.length === 0) {

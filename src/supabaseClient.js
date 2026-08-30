@@ -661,4 +661,154 @@ export async function setGlobalStreamingMode(mode) {
   }
 }
 
+/**
+ * Default Entitlement Matrix for SMD Prime User Roles
+ */
+export const DEFAULT_ROLE_POLICIES = {
+  normal: {
+    max_resolution: '720p',
+    download_access: false,
+    external_player: false,
+    sa_mesh_priority: 'Standard',
+    parallel_streams: 1
+  },
+  premium: {
+    max_resolution: '4K',
+    download_access: true,
+    external_player: true,
+    sa_mesh_priority: 'Turbo',
+    parallel_streams: 3
+  },
+  admin: {
+    max_resolution: '4K',
+    download_access: true,
+    external_player: true,
+    sa_mesh_priority: 'VIP',
+    parallel_streams: 999
+  }
+};
+
+const CACHE_KEY_ROLE_POLICIES = 'smd_prime_role_policies';
+
+/**
+ * Fetch dynamic Role Policies from LocalStorage cache or Supabase DB
+ */
+export async function getRolePolicies() {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY_ROLE_POLICIES);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && parsed.normal) return parsed;
+    }
+  } catch (e) {}
+
+  try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'role_policies')
+      .maybeSingle();
+
+    if (data && data.value) {
+      const dbPolicies = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+      const merged = { ...DEFAULT_ROLE_POLICIES, ...dbPolicies };
+      localStorage.setItem(CACHE_KEY_ROLE_POLICIES, JSON.stringify(merged));
+      return merged;
+    }
+  } catch (e) {}
+
+  return DEFAULT_ROLE_POLICIES;
+}
+
+/**
+ * Save updated Role Policies to LocalStorage & Supabase DB
+ */
+export async function setRolePolicies(newPolicies) {
+  const merged = { ...DEFAULT_ROLE_POLICIES, ...newPolicies };
+  try {
+    localStorage.setItem(CACHE_KEY_ROLE_POLICIES, JSON.stringify(merged));
+  } catch (e) {}
+
+  const evt = new CustomEvent('smd_role_policies_changed', { detail: merged });
+  window.dispatchEvent(evt);
+  document.dispatchEvent(evt);
+
+  try {
+    await supabase
+      .from('system_settings')
+      .upsert({ 
+        key: 'role_policies', 
+        value: JSON.stringify(merged), 
+        updated_at: new Date().toISOString() 
+      }, { onConflict: 'key' });
+  } catch (e) {
+    console.warn('Role policies upsert note:', e);
+  }
+  return merged;
+}
+
+/**
+ * Get user entitlements for a given user role
+ */
+export function getUserEntitlements(userRole = 'normal', activePolicies = null) {
+  const policies = activePolicies || DEFAULT_ROLE_POLICIES;
+  const role = (userRole || 'normal').toLowerCase();
+  return policies[role] || policies.normal || DEFAULT_ROLE_POLICIES.normal;
+}
+
+/**
+ * Fetch all registered Telegram Users for Admin Role Management
+ */
+export async function fetchAllTelegramUsersFromSupabase() {
+  try {
+    const { data, error } = await supabase
+      .from('telegram_users')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.warn('Fetch telegram_users error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Update a user's role (normal, premium, admin) in Supabase DB
+ */
+export async function updateUserRoleInSupabase(telegramId, newRole) {
+  try {
+    if (!telegramId) return { success: false, error: 'Missing telegramId' };
+    const role = (newRole || 'normal').toLowerCase();
+    const idStr = String(telegramId);
+    const idNum = Number(telegramId) || 0;
+
+    // 1. Primary: Update 'users' table (used by AdminModal)
+    const { data: usersData, error: usersErr } = await supabase
+      .from('users')
+      .update({ role: role, updated_at: new Date().toISOString() })
+      .or(`telegram_user_id.eq.${idStr},telegram_id.eq.${idStr}${idNum ? `,id.eq.${idNum}` : ''}`)
+      .select();
+
+    if (usersErr) {
+      console.warn('Update users table note:', usersErr.message);
+    }
+
+    // 2. Secondary: Update 'telegram_users' table if present
+    try {
+      await supabase
+        .from('telegram_users')
+        .update({ role: role, updated_at: new Date().toISOString() })
+        .or(`telegram_id.eq.${idStr},telegram_user_id.eq.${idStr}`)
+        .select();
+    } catch (e2) {}
+
+    return { success: true, data: usersData };
+  } catch (err) {
+    console.warn('Update user role error:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 
