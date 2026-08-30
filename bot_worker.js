@@ -845,18 +845,37 @@ async function fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey, env) 
 }
 
 /**
- * Promote User Role in Supabase Helper
+ * Promote User Role in Supabase Helper (Fail-proof PostgREST UPSERT)
  */
 async function promoteUserInSupabase(telegramId, role, supabaseUrl, supabaseKey) {
+  if (!supabaseUrl || !supabaseKey) return;
+  const tid = String(telegramId);
   try {
-    await fetch(`${supabaseUrl}/rest/v1/telegram_users?telegram_id=eq.${telegramId}`, {
+    // 1. PostgREST UPSERT into telegram_users table
+    await fetch(`${supabaseUrl}/rest/v1/telegram_users`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify({
+        telegram_id: tid,
+        role: role,
+        updated_at: new Date().toISOString()
+      })
+    });
+
+    // 2. Direct PATCH fallback
+    await fetch(`${supabaseUrl}/rest/v1/telegram_users?telegram_id=eq.${tid}`, {
       method: 'PATCH',
       headers: {
         'apikey': supabaseKey,
         'Authorization': `Bearer ${supabaseKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ role })
+      body: JSON.stringify({ role: role })
     });
   } catch (e) {
     console.error('Promote user error:', e);
