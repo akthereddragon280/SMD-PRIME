@@ -152,9 +152,18 @@ export async function fetchMoviesFromSupabase() {
       const backdrop_url = getCinematicBackdrop(title, uid, item.backdrop_url);
 
       const sources = item.movie_sources || [];
-      const primarySource = sources.find(s => s.quality === '1080p') || 
-                            sources.find(s => s.quality === '4K') || 
-                            sources[0];
+      const matchesTamil = (s) => {
+        if (!s) return false;
+        if (Array.isArray(s.audio_languages) && s.audio_languages.some(l => String(l).toLowerCase().includes('tamil'))) return true;
+        const str = `${s.quality || ''} ${s.video_codec || ''} ${s.file_size || ''}`.toLowerCase();
+        return str.includes('tamil') || str.includes('tam');
+      };
+      const tamilSources = sources.filter(matchesTamil);
+      const candidateSources = tamilSources.length > 0 ? tamilSources : sources;
+
+      const primarySource = candidateSources.find(s => s.quality === '1080p') || 
+                            candidateSources.find(s => s.quality === '4K') || 
+                            candidateSources[0];
 
       const genresList = (Array.isArray(item.genres) && item.genres.length > 0) 
         ? item.genres 
@@ -694,9 +703,52 @@ export const DEFAULT_ROLE_POLICIES = {
 const CACHE_KEY_ROLE_POLICIES = 'smd_prime_role_policies';
 
 /**
- * Fetch dynamic Role Policies from Supabase DB or LocalStorage cache
+ * Fetch dynamic Role Policies from row-based `role_policies` table (or fallback `system_settings` / LocalStorage)
  */
 export async function getRolePolicies() {
+  // Strategy 1: Try reading from dedicated row-based `role_policies` table
+  try {
+    const { data: rowData, error: rowError } = await supabase
+      .from('role_policies')
+      .select('*');
+
+    if (rowData && rowData.length > 0) {
+      const merged = { ...DEFAULT_ROLE_POLICIES };
+      rowData.forEach(item => {
+        if (item && item.role) {
+          merged[item.role] = {
+            max_resolution: item.max_resolution || DEFAULT_ROLE_POLICIES[item.role]?.max_resolution || '1080p',
+            download_access: item.download_access !== false,
+            external_player: item.external_player !== false,
+            enable_ads: item.enable_ads === true,
+            sa_mesh_priority: item.sa_mesh_priority || DEFAULT_ROLE_POLICIES[item.role]?.sa_mesh_priority || 'Standard',
+            parallel_streams: item.parallel_streams || DEFAULT_ROLE_POLICIES[item.role]?.parallel_streams || 1
+          };
+        }
+      });
+      try {
+        localStorage.setItem(CACHE_KEY_ROLE_POLICIES, JSON.stringify(merged));
+      } catch (e) {}
+      return merged;
+    } else {
+      // Auto-seed row-based role_policies table if empty
+      const rowsToSeed = Object.entries(DEFAULT_ROLE_POLICIES).map(([role, pol]) => ({
+        role: role,
+        max_resolution: pol.max_resolution,
+        download_access: pol.download_access,
+        external_player: pol.external_player,
+        enable_ads: pol.enable_ads,
+        sa_mesh_priority: pol.sa_mesh_priority,
+        parallel_streams: pol.parallel_streams,
+        updated_at: new Date().toISOString()
+      }));
+      supabase.from('role_policies').upsert(rowsToSeed, { onConflict: 'role' }).catch(() => {});
+    }
+  } catch (e) {
+    console.warn('DB row-based role_policies note:', e);
+  }
+
+  // Strategy 2: Fallback to system_settings key-value table
   try {
     const { data, error } = await supabase
       .from('system_settings')
@@ -714,7 +766,7 @@ export async function getRolePolicies() {
       return merged;
     }
   } catch (e) {
-    console.warn('DB getRolePolicies note:', e);
+    console.warn('DB system_settings role_policies note:', e);
   }
 
   try {
@@ -729,7 +781,7 @@ export async function getRolePolicies() {
 }
 
 /**
- * Save updated Role Policies to Supabase DB & LocalStorage
+ * Save updated Role Policies to Supabase DB (both `role_policies` rows & `system_settings`) + LocalStorage
  */
 export async function setRolePolicies(newPolicies) {
   const merged = { ...DEFAULT_ROLE_POLICIES, ...newPolicies };
@@ -741,6 +793,25 @@ export async function setRolePolicies(newPolicies) {
   window.dispatchEvent(evt);
   document.dispatchEvent(evt);
 
+  // 1. Primary: Save to row-based `role_policies` table (1 row per role)
+  try {
+    const rowsToUpsert = Object.entries(merged).map(([roleName, pol]) => ({
+      role: roleName,
+      max_resolution: pol.max_resolution || '1080p',
+      download_access: pol.download_access !== false,
+      external_player: pol.external_player !== false,
+      enable_ads: pol.enable_ads === true,
+      sa_mesh_priority: pol.sa_mesh_priority || 'Standard',
+      parallel_streams: pol.parallel_streams || 1,
+      updated_at: new Date().toISOString()
+    }));
+
+    await supabase.from('role_policies').upsert(rowsToUpsert, { onConflict: 'role' });
+  } catch (e) {
+    console.warn('role_policies table upsert note:', e);
+  }
+
+  // 2. Secondary: Dual-write to system_settings table for legacy fallback
   try {
     const payload = { 
       key: 'role_policies', 
@@ -748,28 +819,46 @@ export async function setRolePolicies(newPolicies) {
       updated_at: new Date().toISOString() 
     };
 
-    const { error } = await supabase
-      .from('system_settings')
-      .upsert(payload, { onConflict: 'key' });
-
-    if (error) {
-      const { data: existing } = await supabase
-        .from('system_settings')
-        .select('id')
-        .eq('key', 'role_policies')
-        .limit(1)
-        .maybeSingle();
-
-      if (existing && existing.id) {
-        await supabase.from('system_settings').update(payload).eq('id', existing.id);
-      } else {
-        await supabase.from('system_settings').insert(payload);
-      }
-    }
+    await supabase.from('system_settings').upsert(payload, { onConflict: 'key' });
   } catch (e) {
-    console.warn('Role policies upsert note:', e);
+    console.warn('system_settings role_policies upsert note:', e);
   }
   return merged;
+}
+
+/**
+ * DEFAULT BOT SETTINGS (Fallback & Self-Healing Baseline)
+ */
+export const DEFAULT_BOT_SETTINGS = {
+  maintenance_mode: 'false',
+  welcome_message: 'Welcome to SMD PRIME Mini App!',
+  allow_new_registrations: 'true',
+  stream_quality_default: '1080p'
+};
+
+/**
+ * Fetch bot settings with automatic self-healing auto-seeding
+ */
+export async function getBotSettings() {
+  try {
+    const { data, error } = await supabase
+      .from('bot_settings')
+      .select('key, value');
+
+    if (data && data.length > 0) {
+      const map = {};
+      data.forEach(item => { map[item.key] = item.value; });
+      return { ...DEFAULT_BOT_SETTINGS, ...map };
+    } else {
+      // Auto-seed bot_settings table silently if empty
+      Object.entries(DEFAULT_BOT_SETTINGS).forEach(([key, val]) => {
+        supabase.from('bot_settings').upsert({ key, value: val, updated_at: new Date().toISOString() }, { onConflict: 'key' }).catch(() => {});
+      });
+    }
+  } catch (e) {
+    console.warn('getBotSettings note:', e);
+  }
+  return DEFAULT_BOT_SETTINGS;
 }
 
 /**
