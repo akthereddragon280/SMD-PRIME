@@ -779,35 +779,67 @@ export async function fetchAllTelegramUsersFromSupabase() {
 
 /**
  * Update a user's role (normal, premium, admin) in Supabase DB
+ * Performs fail-safe upsert across both 'users' and 'telegram_users' tables
  */
 export async function updateUserRoleInSupabase(telegramId, newRole) {
   try {
     if (!telegramId) return { success: false, error: 'Missing telegramId' };
     const role = (newRole || 'normal').toLowerCase();
-    const idStr = String(telegramId);
     const idNum = Number(telegramId) || 0;
+    const idStr = String(telegramId);
+    const targetId = idNum || idStr;
 
-    // 1. Primary: Update 'users' table (used by AdminModal)
-    const { data: usersData, error: usersErr } = await supabase
-      .from('users')
-      .update({ role: role, updated_at: new Date().toISOString() })
-      .or(`telegram_user_id.eq.${idStr},telegram_id.eq.${idStr}${idNum ? `,id.eq.${idNum}` : ''}`)
-      .select();
+    const payload = {
+      telegram_user_id: targetId,
+      role: role,
+      updated_at: new Date().toISOString()
+    };
 
-    if (usersErr) {
-      console.warn('Update users table note:', usersErr.message);
+    // 1. Primary: Update or Upsert 'users' table
+    try {
+      const { error: err1 } = await supabase
+        .from('users')
+        .upsert(payload, { onConflict: 'telegram_user_id' });
+
+      if (err1) {
+        // Fallback update by telegram_user_id
+        await supabase
+          .from('users')
+          .update({ role: role, updated_at: new Date().toISOString() })
+          .eq('telegram_user_id', targetId);
+      }
+    } catch (e1) {
+      console.warn('users table role update note:', e1);
     }
 
-    // 2. Secondary: Update 'telegram_users' table if present
+    // 2. Secondary: Update or Upsert 'telegram_users' table (for Telegram Bot sync)
     try {
-      await supabase
+      const { error: err2 } = await supabase
         .from('telegram_users')
-        .update({ role: role, updated_at: new Date().toISOString() })
-        .or(`telegram_id.eq.${idStr},telegram_user_id.eq.${idStr}`)
-        .select();
-    } catch (e2) {}
+        .upsert({
+          telegram_user_id: targetId,
+          telegram_id: targetId,
+          role: role,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'telegram_user_id' });
 
-    return { success: true, data: usersData };
+      if (err2) {
+        await supabase
+          .from('telegram_users')
+          .update({ role: role, updated_at: new Date().toISOString() })
+          .eq('telegram_user_id', targetId);
+      }
+    } catch (e2) {
+      console.warn('telegram_users table role update note:', e2);
+    }
+
+    // Broadcast live role change event to UI
+    const evt = new CustomEvent('smd_user_role_updated', { 
+      detail: { telegram_user_id: targetId, role: role } 
+    });
+    window.dispatchEvent(evt);
+
+    return { success: true };
   } catch (err) {
     console.warn('Update user role error:', err.message);
     return { success: false, error: err.message };
