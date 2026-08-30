@@ -5,7 +5,7 @@ import { supabase, logDownloadAnalytics, formatDurationString, getRolePolicies, 
 import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 import { getExactMovieDuration } from '../utils/posters';
-import { getOptimalStreamSource } from './SmartVideoPlayer';
+import { getOptimalStreamSource } from '../utils/streamHelpers';
 import { triggerIntentionalAd } from '../utils/adEngine';
 
 export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
