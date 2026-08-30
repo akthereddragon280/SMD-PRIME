@@ -1,12 +1,13 @@
 /**
  * SMD PRIME — High-ROI Cloudflare Worker Telegram Bot Webhook Engine
  * Features:
- *  - 100% In-App Telegram WebApp Overlay Enforcement
- *  - Automated Referral Pipeline (Invite 3 Friends -> 3 Days Free Premium)
+ *  - Clean Start Welcome Card (No data dump)
+ *  - 100% In-Place Seamless Menu Navigation (editMessageText with « Back to Main Menu)
+ *  - Dynamic Supabase Catalog & Policy Matrix Integration
+ *  - Robust Admin Role Resolution (Syncs users & telegram_users table)
+ *  - Automated Referral Pipeline (3 Invites -> 3 Days Free Premium)
  *  - Deep-linked Movie Auto-Play Streaming Cards (Direct to #player)
- *  - Live Supabase Sync (User Registration, Role Check, Promotion, Stats)
- *  - Monetization Suite (Premium Showcase, Free Trial, Telegram Stars / UPI)
- *  - Full Admin Control (/stats, /promote, /broadcast)
+ *  - Monetization Suite & Admin Controls
  */
 
 const DEFAULT_SUPABASE_URL = 'https://iwulcblngplsjtsipods.supabase.co';
@@ -56,9 +57,9 @@ export default {
         const update = await request.json();
         
         if (update.message) {
-          ctx.waitUntil(handleMessage(update.message, botToken, webAppUrl, supabaseUrl, supabaseKey));
+          ctx.waitUntil(handleMessage(update.message, botToken, webAppUrl, supabaseUrl, supabaseKey, env));
         } else if (update.callback_query) {
-          ctx.waitUntil(handleCallback(update.callback_query, botToken, webAppUrl, supabaseUrl, supabaseKey));
+          ctx.waitUntil(handleCallback(update.callback_query, botToken, webAppUrl, supabaseUrl, supabaseKey, env));
         }
 
         return new Response('OK', { status: 200, headers: CORS_HEADERS });
@@ -75,7 +76,7 @@ export default {
 /**
  * Main Webhook Message Handler
  */
-async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabaseKey) {
+async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabaseKey, env) {
   const chatId = message.chat.id;
   const fromUser = message.from;
   if (!fromUser) return;
@@ -96,84 +97,71 @@ async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabase
     }
   }
 
-  await registerOrUpdateUser(telegramId, firstName, username, referralCode, supabaseUrl, supabaseKey);
+  await registerOrUpdateUser(telegramId, firstName, username, referralCode, supabaseUrl, supabaseKey, env);
 
-  // 1. COMMAND: /start [ref_id]
+  // 1. COMMAND: /start [ref_id] — Clean Intro + Menu Buttons
   if (text.startsWith('/start')) {
-    const [user, stats, policies] = await Promise.all([
-      fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey),
-      fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey),
-      fetchRolePoliciesFromSupabase(supabaseUrl, supabaseKey)
-    ]);
-
-    const role = (user?.role || 'normal').toLowerCase();
-    const userPolicy = policies[role] || {};
-    const roleBadge = role === 'admin' ? '👑 ADMIN' : role === 'premium' ? '⭐ PREMIUM VIP' : '👥 NORMAL';
-    const totalMovies = stats.totalMovies || 0;
-    const latestMovie = stats.latestMovieTitle ? ` (Latest: <i>${escapeHtml(stats.latestMovieTitle)}</i>)` : '';
-
-    const welcomeText = 
-      `⚡ <b>Welcome to SMD PRIME, ${escapeHtml(firstName)}!</b> 🍿\n\n` +
-      `Your ultra-fast cloud cinema streaming engine is live.\n\n` +
-      `📊 <b>LIVE ACCOUNT & CATALOG STATUS:</b>\n` +
-      `▪️ <b>User Role:</b> ${roleBadge}\n` +
-      `▪️ <b>Available Movies:</b> <b>${totalMovies} 4K/HD Titles</b>${latestMovie}\n` +
-      `▪️ <b>Max Stream Quality:</b> ${userPolicy.max_resolution || (role === 'normal' ? '720p' : '4K Ultra HD')}\n` +
-      `▪️ <b>Ad-Free Experience:</b> ${userPolicy.enable_ads === false ? 'Active ✅' : 'Standard Ads 📢'}\n\n` +
-      `<b>💡 Quick Guide:</b>\n` +
-      `• Type any movie name (e.g. <i>Master</i>, <i>Jana Nayagan</i>) for instant cards.\n` +
-      `• Use <b>/refer</b> to invite friends & earn <b>FREE Premium</b>!`;
-
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: '🚀 Launch SMD PRIME Catalog', web_app: { url: webAppUrl } }],
-        [
-          { text: '⭐ Buy Premium Pass', callback_data: 'buy_premium' },
-          { text: '🎁 Refer Friends', callback_data: 'refer_friends' }
-        ],
-        [
-          { text: '📊 My Account Status', callback_data: 'my_plan' },
-          { text: '⚡ Help Center', callback_data: 'help_info' }
-        ]
-      ]
-    };
-
+    const startView = getStartView(firstName, webAppUrl);
     await sendTelegramApi(botToken, 'sendMessage', {
       chat_id: chatId,
-      text: welcomeText,
+      text: startView.text,
       parse_mode: 'HTML',
-      reply_markup: keyboard
+      reply_markup: startView.keyboard
     });
     return;
   }
 
   // 2. COMMAND: /help
   if (text.startsWith('/help')) {
-    await sendHelpCard(chatId, botToken, webAppUrl, supabaseUrl, supabaseKey);
+    const helpView = await getHelpView(webAppUrl, supabaseUrl, supabaseKey);
+    await sendTelegramApi(botToken, 'sendMessage', {
+      chat_id: chatId,
+      text: helpView.text,
+      parse_mode: 'HTML',
+      reply_markup: helpView.keyboard
+    });
     return;
   }
 
   // 3. COMMAND: /myplan or /info
   if (text.startsWith('/myplan') || text.startsWith('/info')) {
-    await sendUserPlanCard(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey);
+    const planView = await getUserPlanView(telegramId, supabaseUrl, supabaseKey, webAppUrl, env);
+    await sendTelegramApi(botToken, 'sendMessage', {
+      chat_id: chatId,
+      text: planView.text,
+      parse_mode: 'HTML',
+      reply_markup: planView.keyboard
+    });
     return;
   }
 
   // 4. COMMAND: /refer
   if (text.startsWith('/refer')) {
-    await sendReferralCard(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey);
+    const referView = await getReferralView(telegramId, supabaseUrl, supabaseKey, webAppUrl, env);
+    await sendTelegramApi(botToken, 'sendMessage', {
+      chat_id: chatId,
+      text: referView.text,
+      parse_mode: 'HTML',
+      reply_markup: referView.keyboard
+    });
     return;
   }
 
   // 5. COMMAND: /premium or /buy
   if (text.startsWith('/premium') || text.startsWith('/buy')) {
-    await sendPremiumShowcaseCard(chatId, botToken, webAppUrl, supabaseUrl, supabaseKey);
+    const premView = await getPremiumShowcaseView(webAppUrl, supabaseUrl, supabaseKey);
+    await sendTelegramApi(botToken, 'sendMessage', {
+      chat_id: chatId,
+      text: premView.text,
+      parse_mode: 'HTML',
+      reply_markup: premView.keyboard
+    });
     return;
   }
 
   // 6. COMMAND: /freetrial
   if (text.startsWith('/freetrial')) {
-    await handleFreeTrialRequest(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey);
+    await handleFreeTrialRequest(chatId, null, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey, env);
     return;
   }
 
@@ -218,74 +206,131 @@ async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabase
 }
 
 /**
- * Callback Query Handler
+ * Callback Query Handler — 100% In-Place Message Editing (editMessageText)
  */
-async function handleCallback(callbackQuery, botToken, webAppUrl, supabaseUrl, supabaseKey) {
-  const chatId = callbackQuery.message?.chat?.id;
+async function handleCallback(callbackQuery, botToken, webAppUrl, supabaseUrl, supabaseKey, env) {
+  const message = callbackQuery.message;
+  const chatId = message?.chat?.id;
+  const messageId = message?.message_id;
   const telegramId = String(callbackQuery.from.id);
+  const firstName = callbackQuery.from.first_name || 'Movie Fan';
   const data = callbackQuery.data;
 
   await sendTelegramApi(botToken, 'answerCallbackQuery', {
     callback_query_id: callbackQuery.id
   });
 
-  if (!chatId) return;
+  if (!chatId || !messageId) return;
 
-  if (data === 'help_info') {
-    await sendHelpCard(chatId, botToken, webAppUrl);
+  let view = null;
+
+  if (data === 'main_menu') {
+    view = getStartView(firstName, webAppUrl);
+  } else if (data === 'help_info') {
+    view = await getHelpView(webAppUrl, supabaseUrl, supabaseKey);
   } else if (data === 'buy_premium') {
-    await sendPremiumShowcaseCard(chatId, botToken, webAppUrl);
+    view = await getPremiumShowcaseView(webAppUrl, supabaseUrl, supabaseKey);
   } else if (data === 'refer_friends') {
-    await sendReferralCard(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey);
+    view = await getReferralView(telegramId, supabaseUrl, supabaseKey, webAppUrl, env);
   } else if (data === 'my_plan') {
-    await sendUserPlanCard(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey);
+    view = await getUserPlanView(telegramId, supabaseUrl, supabaseKey, webAppUrl, env);
   } else if (data === 'free_trial') {
-    await handleFreeTrialRequest(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey);
+    await handleFreeTrialRequest(chatId, messageId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey, env);
+    return;
+  }
+
+  if (view) {
+    await sendTelegramApi(botToken, 'editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: view.text,
+      parse_mode: 'HTML',
+      reply_markup: view.keyboard
+    });
   }
 }
 
+// ==========================================
+// UNIFIED BOT UI VIEW BUILDERS
+// ==========================================
+
 /**
- * Help Center Card Generator
+ * 1. Clean Start Welcome View
  */
-async function sendHelpCard(chatId, botToken, webAppUrl, supabaseUrl, supabaseKey) {
-  const stats = await fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey);
-  const helpText = 
-    `🍿 <b>SMD PRIME — User Guide & Help Center</b>\n\n` +
-    `<b>1. Browse & Stream Movies (${stats.totalMovies} Live Titles):</b>\n` +
-    `Tap <b>'🚀 Launch SMD PRIME'</b> below to open the Mini App and stream movies in 1080p/4K.\n\n` +
-    `<b>2. Instant Chat Search:</b>\n` +
-    `Type any movie name directly in this chat to receive interactive movie cards with instant play buttons.\n\n` +
-    `<b>3. Earn Free Premium:</b>\n` +
-    `Use <b>/refer</b> to invite 3 friends to SMD PRIME and get 3 Days of Ad-Free Premium automatically!\n\n` +
-    `<b>4. External Player Handoff:</b>\n` +
-    `Inside the video player, tap <b>'EXT'</b> to stream seamlessly in external players like VLC or MX Player.`;
+function getStartView(firstName, webAppUrl) {
+  const text = 
+    `⚡ <b>Welcome to SMD PRIME, ${escapeHtml(firstName)}!</b> 🍿\n\n` +
+    `Your ultra-fast cloud cinema streaming engine is live. Tap the button below to launch the OTT streaming app directly inside Telegram with zero buffering & 4K quality!\n\n` +
+    `<b>💡 Quick Guide:</b>\n` +
+    `• Type any movie name (e.g. <i>Master</i>, <i>Jana Nayagan</i>) for instant cards.\n` +
+    `• Tap any button below to view your plan or referral perks!`;
 
   const keyboard = {
     inline_keyboard: [
-      [{ text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }],
+      [{ text: '🚀 Launch SMD PRIME Catalog', web_app: { url: webAppUrl } }],
       [
-        { text: '⭐ Buy Premium', callback_data: 'buy_premium' },
-        { text: '👥 Refer Friends', callback_data: 'refer_friends' }
+        { text: '📊 My Account Status', callback_data: 'my_plan' },
+        { text: '⭐ VIP Premium', callback_data: 'buy_premium' }
+      ],
+      [
+        { text: '👥 Refer & Earn Free VIP', callback_data: 'refer_friends' },
+        { text: '⚡ Help & Guide', callback_data: 'help_info' }
       ]
     ]
   };
 
-  await sendTelegramApi(botToken, 'sendMessage', {
-    chat_id: chatId,
-    text: helpText,
-    parse_mode: 'HTML',
-    reply_markup: keyboard
-  });
+  return { text, keyboard };
 }
 
 /**
- * Premium Showcase Card
+ * 2. User Account & Live Policy Matrix View
  */
-async function sendPremiumShowcaseCard(chatId, botToken, webAppUrl, supabaseUrl, supabaseKey) {
+async function getUserPlanView(telegramId, supabaseUrl, supabaseKey, webAppUrl, env) {
+  const [user, policies] = await Promise.all([
+    fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey, env),
+    fetchRolePoliciesFromSupabase(supabaseUrl, supabaseKey)
+  ]);
+
+  const role = (user?.role || 'normal').toLowerCase();
+  const policy = policies[role] || {};
+  const refCount = user?.referral_count || 0;
+  const roleBadge = role === 'admin' ? '👑 ADMIN' : role === 'premium' ? '⭐ PREMIUM VIP' : '👥 NORMAL MEMBER';
+
+  const text = 
+    `📊 <b>SMD PRIME — My Account Status</b>\n\n` +
+    `👤 <b>Telegram ID:</b> <code>${telegramId}</code>\n` +
+    `🏅 <b>Role Status:</b> ${roleBadge}\n` +
+    `👥 <b>Successful Referrals:</b> ${refCount} Users\n\n` +
+    `<b>⚡ Plan Capabilities (Live Policy Matrix):</b>\n` +
+    `• Max Quality: <b>${policy.max_resolution || (role === 'normal' ? '720p' : '4K Ultra HD')}</b>\n` +
+    `• Direct Downloads: <b>${policy.download_access !== false ? 'Unlimited ⚡' : 'Restricted 🔒'}</b>\n` +
+    `• External Player Handoff: <b>${policy.external_player !== false ? 'Enabled 🎬' : 'Restricted 🔒'}</b>\n` +
+    `• Ad-Free Experience: <b>${policy.enable_ads === false ? 'Active ✅' : 'Standard Ads 📢'}</b>` +
+    (role === 'normal' ? `\n\n💡 <i>Upgrade to Premium for 4K & Ad-Free streaming!</i>` : '');
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }],
+      role === 'normal'
+        ? [{ text: '⭐ Upgrade to Premium', callback_data: 'buy_premium' }]
+        : [{ text: '👥 Refer More Friends', callback_data: 'refer_friends' }],
+      [{ text: '« Back to Main Menu', callback_data: 'main_menu' }]
+    ]
+  };
+
+  return { text, keyboard };
+}
+
+/**
+ * 3. Premium Showcase View
+ */
+async function getPremiumShowcaseView(webAppUrl, supabaseUrl, supabaseKey) {
   const stats = await fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey);
-  const premiumText = 
+  const totalMovies = stats.totalMovies || '150+';
+
+  const text = 
     `👑 <b>SMD PRIME VIP PREMIUM MEMBERSHIP</b>\n\n` +
-    `Unlock the ultimate cinema experience across <b>${stats.totalMovies}+ Live 4K Movies</b> with Zero Ads!\n\n` +
+    `Unlock the ultimate cinema experience across <b>${totalMovies} Live 4K Movies</b> with Zero Ads!\n\n` +
     `✨ <b>PREMIUM BENEFITS:</b>\n` +
     `▪️ 🚫 <b>100% Ad-Free Experience</b> (Zero Popups)\n` +
     `▪️ 🎬 <b>Ultra HD 4K Streaming</b> Support\n` +
@@ -301,65 +346,19 @@ async function sendPremiumShowcaseCard(chatId, botToken, webAppUrl, supabaseUrl,
     inline_keyboard: [
       [{ text: '🚀 Launch & Upgrade in App', web_app: { url: `${webAppUrl}#premium` } }],
       [{ text: '🎁 Activate 24H Free Trial', callback_data: 'free_trial' }],
-      [{ text: '👥 Refer Friends for Free VIP', callback_data: 'refer_friends' }]
+      [{ text: '👥 Refer Friends for Free VIP', callback_data: 'refer_friends' }],
+      [{ text: '« Back to Main Menu', callback_data: 'main_menu' }]
     ]
   };
 
-  await sendTelegramApi(botToken, 'sendMessage', {
-    chat_id: chatId,
-    text: premiumText,
-    parse_mode: 'HTML',
-    reply_markup: keyboard
-  });
+  return { text, keyboard };
 }
 
 /**
- * User Account Plan & Status Card
+ * 4. Referral Program View
  */
-async function sendUserPlanCard(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey) {
-  const [user, policies] = await Promise.all([
-    fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey),
-    fetchRolePoliciesFromSupabase(supabaseUrl, supabaseKey)
-  ]);
-  const role = (user?.role || 'normal').toLowerCase();
-  const policy = policies[role] || {};
-  const refCount = user?.referral_count || 0;
-  const roleBadge = role === 'admin' ? '👑 ADMIN' : role === 'premium' ? '⭐ PREMIUM VIP' : '👥 NORMAL MEMBER';
-
-  const planText = 
-    `📊 <b>SMD PRIME — My Account Status</b>\n\n` +
-    `👤 <b>Telegram ID:</b> <code>${telegramId}</code>\n` +
-    `🏅 <b>Role Status:</b> ${roleBadge}\n` +
-    `👥 <b>Successful Referrals:</b> ${refCount} Users\n\n` +
-    `<b>⚡ Plan Capabilities (Live Policy Matrix):</b>\n` +
-    `• Max Quality: <b>${policy.max_resolution || '720p'}</b>\n` +
-    `• Direct Downloads: <b>${policy.download_access ? 'Enabled ⚡' : 'Restricted 🔒'}</b>\n` +
-    `• External Player Handoff: <b>${policy.external_player !== false ? 'Enabled 🎬' : 'Restricted 🔒'}</b>\n` +
-    `• Ad-Free Experience: <b>${policy.enable_ads === false ? 'Active ✅' : 'Standard Ads 📢'}</b>` +
-    (role === 'normal' ? `\n\n💡 <i>Upgrade to Premium for 4K & Ad-Free streaming!</i>` : '');
-
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }],
-      role === 'normal'
-        ? [{ text: '⭐ Upgrade to Premium', callback_data: 'buy_premium' }]
-        : [{ text: '👥 Refer More Friends', callback_data: 'refer_friends' }]
-    ]
-  };
-
-  await sendTelegramApi(botToken, 'sendMessage', {
-    chat_id: chatId,
-    text: planText,
-    parse_mode: 'HTML',
-    reply_markup: keyboard
-  });
-}
-
-/**
- * Referral Program Card
- */
-async function sendReferralCard(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey) {
-  const user = await fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey);
+async function getReferralView(telegramId, supabaseUrl, supabaseKey, webAppUrl, env) {
+  const user = await fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey, env);
   const refCount = user?.referral_count || 0;
   const target = 3;
   const refLink = `https://t.me/SMD_PRIME_BOT?start=ref_${telegramId}`;
@@ -369,7 +368,7 @@ async function sendReferralCard(chatId, telegramId, botToken, webAppUrl, supabas
   const empty = target - filled;
   const progressBar = '█'.repeat(filled) + '░'.repeat(empty);
 
-  const referText = 
+  const text = 
     `🎁 <b>SMD PRIME — Viral Referral Program</b>\n\n` +
     `Invite <b>3 Friends</b> to join SMD PRIME and instantly receive <b>3 Days of VIP Premium</b> for FREE! 🎉\n\n` +
     `📊 <b>Your Referral Progress:</b>\n` +
@@ -383,30 +382,77 @@ async function sendReferralCard(chatId, telegramId, botToken, webAppUrl, supabas
       [
         { text: '📲 Share Referral Link', url: `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent('🍿 Watch 4K Tamil & English Movies for FREE on SMD PRIME Cinema!')}` }
       ],
-      [{ text: '🚀 Open SMD PRIME App', web_app: { url: webAppUrl } }]
+      [{ text: '🚀 Open SMD PRIME App', web_app: { url: webAppUrl } }],
+      [{ text: '« Back to Main Menu', callback_data: 'main_menu' }]
     ]
   };
 
-  await sendTelegramApi(botToken, 'sendMessage', {
-    chat_id: chatId,
-    text: referText,
-    parse_mode: 'HTML',
-    reply_markup: keyboard
-  });
+  return { text, keyboard };
+}
+
+/**
+ * 5. Help Center View
+ */
+async function getHelpView(webAppUrl, supabaseUrl, supabaseKey) {
+  const stats = await fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey);
+  const totalMovies = stats.totalMovies || '150+';
+
+  const text = 
+    `🍿 <b>SMD PRIME — User Guide & Help Center</b>\n\n` +
+    `<b>1. Browse & Stream Movies (${totalMovies} Live Titles):</b>\n` +
+    `Tap <b>'🚀 Launch SMD PRIME'</b> below to open the Mini App and stream movies in 1080p/4K.\n\n` +
+    `<b>2. Instant Chat Search:</b>\n` +
+    `Type any movie name directly in this chat to receive interactive movie cards with instant play buttons.\n\n` +
+    `<b>3. Earn Free Premium:</b>\n` +
+    `Use <b>/refer</b> to invite 3 friends to SMD PRIME and get 3 Days of Ad-Free Premium automatically!\n\n` +
+    `<b>4. External Player Handoff:</b>\n` +
+    `Inside the video player, tap <b>'EXT'</b> to stream seamlessly in external players like VLC or MX Player.`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }],
+      [
+        { text: '⭐ Buy Premium', callback_data: 'buy_premium' },
+        { text: '👥 Refer Friends', callback_data: 'refer_friends' }
+      ],
+      [{ text: '« Back to Main Menu', callback_data: 'main_menu' }]
+    ]
+  };
+
+  return { text, keyboard };
 }
 
 /**
  * Free Trial Request Handler
  */
-async function handleFreeTrialRequest(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey) {
-  const user = await fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey);
+async function handleFreeTrialRequest(chatId, messageId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey, env) {
+  const user = await fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey, env);
   
   if (user?.role === 'premium' || user?.role === 'admin') {
-    await sendTelegramApi(botToken, 'sendMessage', {
-      chat_id: chatId,
-      text: '⭐ <b>You already have VIP Premium status active!</b> Enjoy unlimited 4K ad-free streaming.',
-      parse_mode: 'HTML'
-    });
+    const activeText = '⭐ <b>You already have VIP Premium status active!</b> Enjoy unlimited 4K ad-free streaming.';
+    const activeKeyboard = {
+      inline_keyboard: [
+        [{ text: '🍿 Stream 4K Movies Now', web_app: { url: webAppUrl } }],
+        [{ text: '« Back to Main Menu', callback_data: 'main_menu' }]
+      ]
+    };
+
+    if (messageId) {
+      await sendTelegramApi(botToken, 'editMessageText', {
+        chat_id: chatId,
+        message_id: messageId,
+        text: activeText,
+        parse_mode: 'HTML',
+        reply_markup: activeKeyboard
+      });
+    } else {
+      await sendTelegramApi(botToken, 'sendMessage', {
+        chat_id: chatId,
+        text: activeText,
+        parse_mode: 'HTML',
+        reply_markup: activeKeyboard
+      });
+    }
     return;
   }
 
@@ -420,16 +466,27 @@ async function handleFreeTrialRequest(chatId, telegramId, botToken, webAppUrl, s
 
   const keyboard = {
     inline_keyboard: [
-      [{ text: '🍿 Stream 4K Movies Now', web_app: { url: webAppUrl } }]
+      [{ text: '🍿 Stream 4K Movies Now', web_app: { url: webAppUrl } }],
+      [{ text: '« Back to Main Menu', callback_data: 'main_menu' }]
     ]
   };
 
-  await sendTelegramApi(botToken, 'sendMessage', {
-    chat_id: chatId,
-    text: trialText,
-    parse_mode: 'HTML',
-    reply_markup: keyboard
-  });
+  if (messageId) {
+    await sendTelegramApi(botToken, 'editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text: trialText,
+      parse_mode: 'HTML',
+      reply_markup: keyboard
+    });
+  } else {
+    await sendTelegramApi(botToken, 'sendMessage', {
+      chat_id: chatId,
+      text: trialText,
+      parse_mode: 'HTML',
+      reply_markup: keyboard
+    });
+  }
 }
 
 /**
@@ -654,14 +711,19 @@ async function handleAdminBroadcast(chatId, broadcastMessage, botToken, webAppUr
 /**
  * Supabase User Sync & Registration Helper
  */
-async function registerOrUpdateUser(telegramId, firstName, username, referralCode, supabaseUrl, supabaseKey) {
+async function registerOrUpdateUser(telegramId, firstName, username, referralCode, supabaseUrl, supabaseKey, env) {
   if (!supabaseUrl || !supabaseKey) return;
 
   try {
-    // 1. Check existing user
-    const existing = await fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey);
+    // Check if user is known Admin
+    const user = await fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey, env);
 
-    if (!existing) {
+    if (!user) {
+      // Determine default role (check if telegramId matches ADMIN_IDS or default)
+      const adminIds = (env?.ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+      const isKnownAdmin = adminIds.includes(telegramId);
+      const defaultRole = isKnownAdmin ? 'admin' : 'normal';
+
       // Create new user record
       await fetch(`${supabaseUrl}/rest/v1/telegram_users`, {
         method: 'POST',
@@ -675,7 +737,7 @@ async function registerOrUpdateUser(telegramId, firstName, username, referralCod
           telegram_id: telegramId,
           first_name: firstName,
           username: username,
-          role: 'normal',
+          role: defaultRole,
           referral_count: 0,
           referred_by: referralCode || null,
           created_at: new Date().toISOString()
@@ -684,10 +746,10 @@ async function registerOrUpdateUser(telegramId, firstName, username, referralCod
 
       // Handle referral credit for referrer if referralCode exists
       if (referralCode && referralCode !== telegramId) {
-        const referrer = await fetchUserFromSupabase(referralCode, supabaseUrl, supabaseKey);
+        const referrer = await fetchUserFromSupabase(referralCode, supabaseUrl, supabaseKey, env);
         if (referrer) {
           const newRefCount = (referrer.referral_count || 0) + 1;
-          const newRole = newRefCount >= 3 ? 'premium' : (referrer.role || 'normal');
+          const newRole = (referrer.role === 'admin') ? 'admin' : (newRefCount >= 3 ? 'premium' : (referrer.role || 'normal'));
 
           await fetch(`${supabaseUrl}/rest/v1/telegram_users?telegram_id=eq.${referralCode}`, {
             method: 'PATCH',
@@ -724,19 +786,57 @@ async function registerOrUpdateUser(telegramId, firstName, username, referralCod
 }
 
 /**
- * Fetch User Record from Supabase
+ * Fetch User Record from Supabase with Multi-Table & Admin ID Detection
  */
-async function fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey) {
+async function fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey, env) {
   try {
-    const res = await fetch(`${supabaseUrl}/rest/v1/telegram_users?telegram_id=eq.${telegramId}&limit=1`, {
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`
-      }
+    const adminIds = (env?.ADMIN_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+    const isConfiguredAdmin = adminIds.includes(String(telegramId));
+
+    // 1. Check telegram_users table
+    const tgRes = await fetch(`${supabaseUrl}/rest/v1/telegram_users?telegram_id=eq.${telegramId}&limit=1`, {
+      headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
     });
-    if (res.ok) {
-      const data = await res.json();
-      return data && data.length > 0 ? data[0] : null;
+    
+    let tgUser = null;
+    if (tgRes.ok) {
+      const data = await tgRes.json();
+      if (data && data.length > 0) tgUser = data[0];
+    }
+
+    // 2. Check main users table
+    const usersRes = await fetch(`${supabaseUrl}/rest/v1/users?or=(telegram_user_id.eq.${telegramId},id.eq.${telegramId})&limit=1`, {
+      headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+    });
+
+    let mainUser = null;
+    if (usersRes.ok) {
+      const data = await usersRes.json();
+      if (data && data.length > 0) mainUser = data[0];
+    }
+
+    // Determine highest privilege role
+    let finalRole = (tgUser?.role || mainUser?.role || 'normal').toLowerCase();
+    if (mainUser?.is_admin === true || mainUser?.role === 'admin' || tgUser?.role === 'admin' || isConfiguredAdmin) {
+      finalRole = 'admin';
+    }
+
+    // Auto-sync admin role back to telegram_users table if needed
+    if (tgUser && finalRole === 'admin' && tgUser.role !== 'admin') {
+      await promoteUserInSupabase(telegramId, 'admin', supabaseUrl, supabaseKey);
+      tgUser.role = 'admin';
+    }
+
+    if (tgUser) {
+      return { ...tgUser, role: finalRole };
+    }
+
+    if (mainUser) {
+      return { telegram_id: telegramId, referral_count: 0, ...mainUser, role: finalRole };
+    }
+
+    if (isConfiguredAdmin) {
+      return { telegram_id: telegramId, role: 'admin', referral_count: 0 };
     }
   } catch (e) {
     console.error('Fetch user error:', e);
@@ -799,33 +899,35 @@ function escapeHtml(str) {
 }
 
 /**
- * Fetch Catalog Stats from Supabase
+ * Fetch Live Catalog Stats from Supabase
  */
 async function fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey) {
-  if (!supabaseUrl || !supabaseKey) return { totalMovies: '0', latestMovieTitle: '' };
+  if (!supabaseUrl || !supabaseKey) return { totalMovies: '150+', latestMovieTitle: '' };
   try {
-    const [countRes, latestRes] = await Promise.all([
-      fetch(`${supabaseUrl}/rest/v1/movies?select=count`, {
-        headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}`, 'Prefer': 'count=exact' }
-      }),
-      fetch(`${supabaseUrl}/rest/v1/movies?select=title&order=created_at.desc&limit=1`, {
-        headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-      })
-    ]);
+    const res = await fetch(`${supabaseUrl}/rest/v1/movies?select=id,title&order=created_at.desc&limit=1000`, {
+      headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}`, 'Prefer': 'count=exact' }
+    });
 
-    const totalMovies = countRes.headers.get('content-range')?.split('/')[1] || '0';
+    let totalMovies = '150+';
     let latestMovieTitle = '';
-    if (latestRes.ok) {
-      const latestData = await latestRes.json();
-      if (latestData && latestData.length > 0) {
-        latestMovieTitle = sanitizeTitle(latestData[0].title);
+
+    if (res.ok) {
+      const contentRange = res.headers.get('content-range');
+      if (contentRange && contentRange.includes('/')) {
+        const count = contentRange.split('/')[1];
+        if (count && count !== '*') totalMovies = count;
+      }
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        if (totalMovies === '150+') totalMovies = String(data.length);
+        latestMovieTitle = sanitizeTitle(data[0].title);
       }
     }
 
     return { totalMovies, latestMovieTitle };
   } catch (e) {
     console.error('Fetch catalog stats error:', e);
-    return { totalMovies: '0', latestMovieTitle: '' };
+    return { totalMovies: '150+', latestMovieTitle: '' };
   }
 }
 
@@ -835,8 +937,8 @@ async function fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey) {
 async function fetchRolePoliciesFromSupabase(supabaseUrl, supabaseKey) {
   const defaults = {
     normal: { max_resolution: '720p', download_access: false, external_player: false, enable_ads: true },
-    premium: { max_resolution: '4K', download_access: true, external_player: true, enable_ads: false },
-    admin: { max_resolution: '4K', download_access: true, external_player: true, enable_ads: false }
+    premium: { max_resolution: '4K Ultra HD', download_access: true, external_player: true, enable_ads: false },
+    admin: { max_resolution: '4K Ultra HD', download_access: true, external_player: true, enable_ads: false }
   };
 
   if (!supabaseUrl || !supabaseKey) return defaults;
