@@ -100,23 +100,39 @@ async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabase
 
   // 1. COMMAND: /start [ref_id]
   if (text.startsWith('/start')) {
+    const [user, stats, policies] = await Promise.all([
+      fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey),
+      fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey),
+      fetchRolePoliciesFromSupabase(supabaseUrl, supabaseKey)
+    ]);
+
+    const role = (user?.role || 'normal').toLowerCase();
+    const userPolicy = policies[role] || {};
+    const roleBadge = role === 'admin' ? '👑 ADMIN' : role === 'premium' ? '⭐ PREMIUM VIP' : '👥 NORMAL';
+    const totalMovies = stats.totalMovies || 0;
+    const latestMovie = stats.latestMovieTitle ? ` (Latest: <i>${escapeHtml(stats.latestMovieTitle)}</i>)` : '';
+
     const welcomeText = 
       `⚡ <b>Welcome to SMD PRIME, ${escapeHtml(firstName)}!</b> 🍿\n\n` +
-      `Your ultra-fast cloud cinema streaming engine is live. ` +
-      `Tap the button below to launch the OTT streaming app directly inside Telegram with zero buffering & 4K quality!\n\n` +
+      `Your ultra-fast cloud cinema streaming engine is live.\n\n` +
+      `📊 <b>LIVE ACCOUNT & CATALOG STATUS:</b>\n` +
+      `▪️ <b>User Role:</b> ${roleBadge}\n` +
+      `▪️ <b>Available Movies:</b> <b>${totalMovies} 4K/HD Titles</b>${latestMovie}\n` +
+      `▪️ <b>Max Stream Quality:</b> ${userPolicy.max_resolution || (role === 'normal' ? '720p' : '4K Ultra HD')}\n` +
+      `▪️ <b>Ad-Free Experience:</b> ${userPolicy.enable_ads === false ? 'Active ✅' : 'Standard Ads 📢'}\n\n` +
       `<b>💡 Quick Guide:</b>\n` +
       `• Type any movie name (e.g. <i>Master</i>, <i>Jana Nayagan</i>) for instant cards.\n` +
       `• Use <b>/refer</b> to invite friends & earn <b>FREE Premium</b>!`;
 
     const keyboard = {
       inline_keyboard: [
-        [{ text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }],
+        [{ text: '🚀 Launch SMD PRIME Catalog', web_app: { url: webAppUrl } }],
         [
-          { text: '⭐ Buy Premium', callback_data: 'buy_premium' },
-          { text: '👥 Refer Friends', callback_data: 'refer_friends' }
+          { text: '⭐ Buy Premium Pass', callback_data: 'buy_premium' },
+          { text: '🎁 Refer Friends', callback_data: 'refer_friends' }
         ],
         [
-          { text: '📊 My Account', callback_data: 'my_plan' },
+          { text: '📊 My Account Status', callback_data: 'my_plan' },
           { text: '⚡ Help Center', callback_data: 'help_info' }
         ]
       ]
@@ -133,7 +149,7 @@ async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabase
 
   // 2. COMMAND: /help
   if (text.startsWith('/help')) {
-    await sendHelpCard(chatId, botToken, webAppUrl);
+    await sendHelpCard(chatId, botToken, webAppUrl, supabaseUrl, supabaseKey);
     return;
   }
 
@@ -151,7 +167,7 @@ async function handleMessage(message, botToken, webAppUrl, supabaseUrl, supabase
 
   // 5. COMMAND: /premium or /buy
   if (text.startsWith('/premium') || text.startsWith('/buy')) {
-    await sendPremiumShowcaseCard(chatId, botToken, webAppUrl);
+    await sendPremiumShowcaseCard(chatId, botToken, webAppUrl, supabaseUrl, supabaseKey);
     return;
   }
 
@@ -231,10 +247,11 @@ async function handleCallback(callbackQuery, botToken, webAppUrl, supabaseUrl, s
 /**
  * Help Center Card Generator
  */
-async function sendHelpCard(chatId, botToken, webAppUrl) {
+async function sendHelpCard(chatId, botToken, webAppUrl, supabaseUrl, supabaseKey) {
+  const stats = await fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey);
   const helpText = 
     `🍿 <b>SMD PRIME — User Guide & Help Center</b>\n\n` +
-    `<b>1. Browse & Stream Movies:</b>\n` +
+    `<b>1. Browse & Stream Movies (${stats.totalMovies} Live Titles):</b>\n` +
     `Tap <b>'🚀 Launch SMD PRIME'</b> below to open the Mini App and stream movies in 1080p/4K.\n\n` +
     `<b>2. Instant Chat Search:</b>\n` +
     `Type any movie name directly in this chat to receive interactive movie cards with instant play buttons.\n\n` +
@@ -264,10 +281,11 @@ async function sendHelpCard(chatId, botToken, webAppUrl) {
 /**
  * Premium Showcase Card
  */
-async function sendPremiumShowcaseCard(chatId, botToken, webAppUrl) {
+async function sendPremiumShowcaseCard(chatId, botToken, webAppUrl, supabaseUrl, supabaseKey) {
+  const stats = await fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey);
   const premiumText = 
     `👑 <b>SMD PRIME VIP PREMIUM MEMBERSHIP</b>\n\n` +
-    `Unlock the ultimate cinema experience with Zero Ads & 4K Streaming!\n\n` +
+    `Unlock the ultimate cinema experience across <b>${stats.totalMovies}+ Live 4K Movies</b> with Zero Ads!\n\n` +
     `✨ <b>PREMIUM BENEFITS:</b>\n` +
     `▪️ 🚫 <b>100% Ad-Free Experience</b> (Zero Popups)\n` +
     `▪️ 🎬 <b>Ultra HD 4K Streaming</b> Support\n` +
@@ -299,25 +317,31 @@ async function sendPremiumShowcaseCard(chatId, botToken, webAppUrl) {
  * User Account Plan & Status Card
  */
 async function sendUserPlanCard(chatId, telegramId, botToken, webAppUrl, supabaseUrl, supabaseKey) {
-  const user = await fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey);
-  const role = (user?.role || 'normal').toUpperCase();
+  const [user, policies] = await Promise.all([
+    fetchUserFromSupabase(telegramId, supabaseUrl, supabaseKey),
+    fetchRolePoliciesFromSupabase(supabaseUrl, supabaseKey)
+  ]);
+  const role = (user?.role || 'normal').toLowerCase();
+  const policy = policies[role] || {};
   const refCount = user?.referral_count || 0;
-  const roleBadge = role === 'ADMIN' ? '👑 ADMIN' : role === 'PREMIUM' ? '⭐ PREMIUM VIP' : '👥 NORMAL MEMBER';
+  const roleBadge = role === 'admin' ? '👑 ADMIN' : role === 'premium' ? '⭐ PREMIUM VIP' : '👥 NORMAL MEMBER';
 
   const planText = 
     `📊 <b>SMD PRIME — My Account Status</b>\n\n` +
     `👤 <b>Telegram ID:</b> <code>${telegramId}</code>\n` +
     `🏅 <b>Role Status:</b> ${roleBadge}\n` +
     `👥 <b>Successful Referrals:</b> ${refCount} Users\n\n` +
-    `<b>⚡ Plan Capabilities:</b>\n` +
-    (role === 'NORMAL' 
-      ? `• Max Quality: 720p HD\n• Direct Downloads: Restricted\n• Ad-Free Stream: No\n\n💡 <i>Upgrade to Premium for 4K & Ad-Free streaming!</i>` 
-      : `• Max Quality: 4K Ultra HD 🚀\n• Direct Downloads: Unlimited ⚡\n• Ad-Free Stream: Enabled ✅`);
+    `<b>⚡ Plan Capabilities (Live Policy Matrix):</b>\n` +
+    `• Max Quality: <b>${policy.max_resolution || '720p'}</b>\n` +
+    `• Direct Downloads: <b>${policy.download_access ? 'Enabled ⚡' : 'Restricted 🔒'}</b>\n` +
+    `• External Player Handoff: <b>${policy.external_player !== false ? 'Enabled 🎬' : 'Restricted 🔒'}</b>\n` +
+    `• Ad-Free Experience: <b>${policy.enable_ads === false ? 'Active ✅' : 'Standard Ads 📢'}</b>` +
+    (role === 'normal' ? `\n\n💡 <i>Upgrade to Premium for 4K & Ad-Free streaming!</i>` : '');
 
   const keyboard = {
     inline_keyboard: [
       [{ text: '🚀 Launch SMD PRIME', web_app: { url: webAppUrl } }],
-      role === 'NORMAL' 
+      role === 'normal'
         ? [{ text: '⭐ Upgrade to Premium', callback_data: 'buy_premium' }]
         : [{ text: '👥 Refer More Friends', callback_data: 'refer_friends' }]
     ]
@@ -772,4 +796,63 @@ function escapeHtml(str) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+/**
+ * Fetch Catalog Stats from Supabase
+ */
+async function fetchCatalogStatsFromSupabase(supabaseUrl, supabaseKey) {
+  if (!supabaseUrl || !supabaseKey) return { totalMovies: '0', latestMovieTitle: '' };
+  try {
+    const [countRes, latestRes] = await Promise.all([
+      fetch(`${supabaseUrl}/rest/v1/movies?select=count`, {
+        headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}`, 'Prefer': 'count=exact' }
+      }),
+      fetch(`${supabaseUrl}/rest/v1/movies?select=title&order=created_at.desc&limit=1`, {
+        headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+      })
+    ]);
+
+    const totalMovies = countRes.headers.get('content-range')?.split('/')[1] || '0';
+    let latestMovieTitle = '';
+    if (latestRes.ok) {
+      const latestData = await latestRes.json();
+      if (latestData && latestData.length > 0) {
+        latestMovieTitle = sanitizeTitle(latestData[0].title);
+      }
+    }
+
+    return { totalMovies, latestMovieTitle };
+  } catch (e) {
+    console.error('Fetch catalog stats error:', e);
+    return { totalMovies: '0', latestMovieTitle: '' };
+  }
+}
+
+/**
+ * Fetch Role Policies Matrix from Supabase
+ */
+async function fetchRolePoliciesFromSupabase(supabaseUrl, supabaseKey) {
+  const defaults = {
+    normal: { max_resolution: '720p', download_access: false, external_player: false, enable_ads: true },
+    premium: { max_resolution: '4K', download_access: true, external_player: true, enable_ads: false },
+    admin: { max_resolution: '4K', download_access: true, external_player: true, enable_ads: false }
+  };
+
+  if (!supabaseUrl || !supabaseKey) return defaults;
+
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/system_settings?key=eq.role_policies&limit=1`, {
+      headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.length > 0 && data[0].value) {
+        return { ...defaults, ...data[0].value };
+      }
+    }
+  } catch (e) {
+    console.error('Fetch role policies error:', e);
+  }
+  return defaults;
 }
