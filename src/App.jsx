@@ -224,16 +224,18 @@ export default function App() {
     const tgUser = getTelegramUserInfo();
 
     const resolveUserRole = async () => {
-      const isHashAdmin = typeof window !== 'undefined' && window.location.hash.includes('admin');
-      
-      // Use canonical isAdminUser helper (handles Dev ID 0 and stored admin ID list)
-      if (isAdminOpen || isHashAdmin || isAdminUser(tgUser?.id)) {
+      // 1. Check canonical isAdminUser helper (Dev ID 0 or local storage admin list)
+      if (isAdminUser(tgUser?.id)) {
         return 'admin';
       }
+
+      // 2. Fetch role from Supabase DB
       if (tgUser?.id) {
         const dbRole = await getUserRoleFromSupabase(tgUser.id);
-        if (dbRole) return dbRole;
+        if (dbRole) return dbRole.toLowerCase();
       }
+
+      // 3. Fallback to normal
       return 'normal';
     };
 
@@ -241,7 +243,7 @@ export default function App() {
       const userRole = await resolveUserRole();
       setCurrentUserRole(userRole || 'normal');
 
-      // Security Guard: Auto-close admin modal if user is no longer admin
+      // Security Guard: Auto-close admin modal IMMEDIATELY if user is no longer admin
       if (userRole !== 'admin' && isAdminOpen) {
         setIsAdminOpen(false);
       }
