@@ -159,25 +159,115 @@ function getNextAvailableWorkingSA() {
 }
 
 /**
- * TIER 1 BUSTER: Create Google Drive Shortcut (mimeType: application/vnd.google-apps.shortcut)
- * Consumes 0 BYTES of Google 750GB daily copy quota! Executes in <100ms!
+ * Constructs clean, human-readable Google Drive Shortcut Name:
+ * Format requested by user: Movie Title (Year) Language - Quality [Clone #N]
+ * Example: The Pursuit of Happyness (2006) Tamil/English - 1080p [Clone #1]
  */
-async function createDriveShortcut(fileId, cloneIndex, sa, token) {
+function buildCleanShortcutName(src, cloneIndex) {
+  const movieObj = Array.isArray(src.movies) ? src.movies[0] : src.movies;
+
+  let rawTitle = movieObj?.title || src.movie_uid || 'Movie';
+  // Clean title: replace underscores with spaces and sanitize special characters
+  let title = rawTitle.replace(/_/g, ' ').replace(/[\\/:*?"<>|]/g, '').trim();
+  title = title.replace(/\b\w/g, c => c.toUpperCase());
+
+  const yearStr = movieObj?.release_year ? ` (${movieObj.release_year})` : '';
+  const qualityStr = src.quality ? ` - ${src.quality}` : '';
+
+  return `${title}${yearStr}${qualityStr} [Clone #${cloneIndex}]`;
+}
+
+let cachedCloneFolderId = null;
+
+/**
+ * Ensures a subfolder named "📁 SMD PRIME CLONES" exists inside FOLDER_ID
+ * so all created shortcuts and clones are 100% visible in Google Drive UI!
+ */
+async function getOrCreateCloneFolder(token, parentFolderId = FOLDER_ID) {
+  if (cachedCloneFolderId) return cachedCloneFolderId;
+
   try {
-    const url = `https://www.googleapis.com/drive/v3/files?supportsAllDrives=true`;
-    const res = await fetch(url, {
+    // 1. Search for existing "📁 SMD PRIME CLONES" subfolder inside parent
+    const queryUrl = `https://www.googleapis.com/drive/v3/files?q='${parentFolderId}'+in+parents+and+name='📁 SMD PRIME CLONES'+and+mimeType='application/vnd.google-apps.folder'+and+trashed=false&fields=files(id,name)&supportsAllDrives=true`;
+    const searchRes = await fetch(queryUrl, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (searchRes.ok) {
+      const data = await searchRes.json();
+      if (data.files && data.files.length > 0) {
+        cachedCloneFolderId = data.files[0].id;
+        console.log(`📁 Using existing Google Drive Clones subfolder ID: "${cachedCloneFolderId}"`);
+        return cachedCloneFolderId;
+      }
+    }
+
+    // 2. Create subfolder if not found
+    const createUrl = `https://www.googleapis.com/drive/v3/files?supportsAllDrives=true`;
+    const createRes = await fetch(createUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        name: `[SHORTCUT-${cloneIndex}]_${fileId}`,
-        mimeType: 'application/vnd.google-apps.shortcut',
-        shortcutDetails: {
-          targetId: fileId
-        }
+        name: '📁 SMD PRIME CLONES',
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentFolderId]
       })
+    });
+
+    if (createRes.ok) {
+      const folderData = await createRes.json();
+      cachedCloneFolderId = folderData.id;
+
+      // Grant public reader permissions to subfolder
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${cachedCloneFolderId}/permissions?supportsAllDrives=true`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ role: 'reader', type: 'anyone' })
+        });
+      } catch (permErr) {}
+
+      console.log(`✨ [CREATED SUBFOLDER] "📁 SMD PRIME CLONES" -> Folder ID: "${cachedCloneFolderId}" inside parent "${parentFolderId}"`);
+      return cachedCloneFolderId;
+    }
+  } catch (err) {
+    console.warn(`   ⚠️ Clone subfolder creation note:`, err.message);
+  }
+
+  return parentFolderId;
+}
+
+/**
+ * TIER 1 BUSTER: Create Google Drive Shortcut (mimeType: application/vnd.google-apps.shortcut)
+ * Consumes 0 BYTES of Google 750GB daily copy quota! Executes in <100ms!
+ */
+async function createDriveShortcut(fileId, cloneIndex, sa, token, targetFolderId, customName) {
+  try {
+    const url = `https://www.googleapis.com/drive/v3/files?supportsAllDrives=true`;
+    const nameToUse = customName || `[SHORTCUT-${cloneIndex}]_${fileId}`;
+    const bodyObj = {
+      name: nameToUse,
+      mimeType: 'application/vnd.google-apps.shortcut',
+      shortcutDetails: {
+        targetId: fileId
+      }
+    };
+    if (targetFolderId) {
+      bodyObj.parents = [targetFolderId];
+    }
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(bodyObj)
     });
 
     if (res.ok) {
@@ -210,7 +300,7 @@ async function createDriveShortcut(fileId, cloneIndex, sa, token) {
  * Tier 2: Service Account Permission Sharing
  * Tier 3: Physical Copy Fallback with Graceful Quota Rotation
  */
-async function cloneDriveFile(fileId, cloneIndex) {
+async function cloneDriveFile(fileId, cloneIndex, parentFolderId, customName) {
   let saAttempts = 0;
   const maxAttempts = Math.max(SERVICE_ACCOUNTS.length * 2, 10);
 
@@ -226,25 +316,31 @@ async function cloneDriveFile(fileId, cloneIndex) {
       continue;
     }
 
+    const targetFolderId = await getOrCreateCloneFolder(token, parentFolderId || FOLDER_ID);
+
     // Step A: Attempt Tier 1 Zero-Quota Drive Shortcut first (Uses 0 bytes of 750GB copy quota!)
-    const shortcutId = await createDriveShortcut(fileId, cloneIndex, sa, token);
+    const shortcutId = await createDriveShortcut(fileId, cloneIndex, sa, token, targetFolderId, customName);
     if (shortcutId) {
-      console.log(`   ⚡ [ZERO-QUOTA SHORTCUT CREATED] Shortcut ID: "${shortcutId}" (0 Bytes Quota Consumed)`);
+      console.log(`   ⚡ [ZERO-QUOTA SHORTCUT CREATED] "${customName || shortcutId}" (Saved in 📁 SMD PRIME CLONES)`);
       return { id: shortcutId, allBlacklisted: false, isShortcut: true };
     }
 
     // Step B: If shortcutting fails, attempt Server-Side Physical Copy
     try {
       const url = `https://www.googleapis.com/drive/v3/files/${fileId}/copy?supportsAllDrives=true`;
+      const copyBody = {
+        name: customName || `[CLONE-${cloneIndex}]_${fileId}`
+      };
+      if (targetFolderId) {
+        copyBody.parents = [targetFolderId];
+      }
       const res = await fetch(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          name: `[CLONE-${cloneIndex}]_${fileId}`
-        })
+        body: JSON.stringify(copyBody)
       });
 
       if (res.ok) {
@@ -281,6 +377,85 @@ async function cloneDriveFile(fileId, cloneIndex) {
   return { id: null, allBlacklisted: false };
 }
 
+/**
+ * Delete a specific shortcut file from Google Drive
+ */
+async function deleteDriveShortcut(fileId, token) {
+  try {
+    const delUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`;
+    const res = await fetch(delUrl, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.ok || res.status === 404;
+  } catch (err) {
+    console.warn(`   ⚠️ Error deleting shortcut ID "${fileId}":`, err.message);
+    return false;
+  }
+}
+
+/**
+ * Auto-Sync Engine: Scans actual shortcuts in Google Drive '📁 SMD PRIME CLONES' subfolder
+ * and synchronizes their IDs into Supabase DB 'clone_file_ids' column.
+ */
+async function syncExistingDriveClonesToSupabase(sources, folderId, sa, token) {
+  try {
+    console.log('🔍 Scanning Google Drive "📁 SMD PRIME CLONES" subfolder for existing shortcuts...');
+    const listUrl = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&pageSize=1000&fields=files(id,name,shortcutDetails)&supportsAllDrives=true`;
+    const res = await fetch(listUrl, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (!res.ok) {
+      console.warn('   ⚠️ Drive scanner HTTP note:', res.status);
+      return;
+    }
+
+    const data = await res.json();
+    const driveFiles = data.files || [];
+    console.log(`   Found ${driveFiles.length} actual shortcut file(s) in Google Drive.`);
+
+    if (driveFiles.length === 0) return;
+
+    let syncedCount = 0;
+    for (const src of sources) {
+      const targetId = src.drive_file_id;
+      const movieUid = src.movie_uid;
+      const cleanTitle = (src.movies?.title || movieUid).toLowerCase().replace(/_/g, ' ');
+
+      // Find all shortcuts matching this source file ID or title
+      const matchedFiles = driveFiles.filter(f => {
+        if (f.shortcutDetails?.targetId === targetId) return true;
+        const nameLower = f.name.toLowerCase();
+        return nameLower.includes(cleanTitle.toLowerCase()) || nameLower.includes(movieUid.toLowerCase());
+      });
+
+      if (matchedFiles.length > 0) {
+        const shortcutIds = matchedFiles.map(f => f.id);
+        const existingSet = new Set(Array.isArray(src.clone_file_ids) ? src.clone_file_ids : []);
+        shortcutIds.forEach(id => existingSet.add(id));
+        const mergedClones = Array.from(existingSet);
+
+        if (mergedClones.length !== (src.clone_file_ids || []).length) {
+          src.clone_file_ids = mergedClones;
+          await supabase
+            .from('movie_sources')
+            .update({ clone_file_ids: mergedClones })
+            .eq('id', src.id);
+          syncedCount++;
+        }
+      }
+    }
+    if (syncedCount > 0) {
+      console.log(`   💾 Synchronized ${syncedCount} movie source record(s) with actual Google Drive shortcuts!\n`);
+    } else {
+      console.log('   ✅ All movie source records are already 100% synchronized with Google Drive.\n');
+    }
+  } catch (err) {
+    console.warn('   ⚠️ Drive sync exception:', err.message);
+  }
+}
+
 async function startAutoCloningProcess() {
   console.log('\n======================================================================');
   console.log('  🚀 SMD PRIME - AUTOMATED GOOGLE DRIVE FILE CLONER ENGINE (MAX ROI)');
@@ -288,11 +463,40 @@ async function startAutoCloningProcess() {
 
   SERVICE_ACCOUNTS = await getServiceAccountList();
   console.log(`Loaded ${SERVICE_ACCOUNTS.length} Service Account(s) in Pool.`);
-  console.log('Fetching movie sources from Supabase (Priority: Newest Files First)...');
-  const { data: sources, error } = await supabase
+  // Parse CLI args or ENV for specific targeted movie cloning
+  const args = process.argv.slice(2);
+  let targetMovieUid = process.env.MOVIE_UID || null;
+  const movieArg = args.find(a => a.startsWith('--movie=') || a.startsWith('--movie_uid='));
+  if (movieArg) {
+    targetMovieUid = movieArg.split('=')[1]?.trim();
+  }
+
+  if (targetMovieUid) {
+    console.log(`🎯 TARGETED MOVIE CLONING ACTIVATED: Only cloning movie matching "${targetMovieUid}"`);
+  } else {
+    console.log('Fetching movie sources from Supabase (Priority: Newest Files First)...');
+  }
+
+  let query = supabase
     .from('movie_sources')
-    .select('id, movie_uid, quality, drive_file_id, clone_file_ids, created_at')
-    .order('created_at', { ascending: false });
+    .select(`
+      id,
+      movie_uid,
+      quality,
+      drive_file_id,
+      clone_file_ids,
+      created_at,
+      movies (
+        title,
+        release_year
+      )
+    `);
+
+  if (targetMovieUid) {
+    query = query.ilike('movie_uid', `%${targetMovieUid}%`);
+  }
+
+  const { data: sources, error } = await query.order('created_at', { ascending: false });
 
   if (error) {
     console.error('Failed to fetch movie_sources:', error.message);
@@ -304,7 +508,17 @@ async function startAutoCloningProcess() {
     return;
   }
 
-  console.log(`Found ${sources.length} movie source record(s). Target clones per file: ${TARGET_CLONE_COUNT}\n`);
+  console.log(`Found ${sources.length} movie source record(s).\n`);
+
+  // Run auto-sync engine to ensure DB clone_file_ids matches Google Drive shortcuts
+  const sa = SERVICE_ACCOUNTS[0];
+  if (sa) {
+    const token = await getGoogleDriveTokenForSA(sa);
+    if (token) {
+      const folderId = await getOrCreateCloneFolder(token, FOLDER_ID);
+      await syncExistingDriveClonesToSupabase(sources, folderId, sa, token);
+    }
+  }
 
   let clonedCount = 0;
   let skippedCount = 0;
@@ -314,21 +528,66 @@ async function startAutoCloningProcess() {
     if (allPoolBanned) break;
 
     const existingClones = Array.isArray(src.clone_file_ids) ? src.clone_file_ids : [];
-    const neededCount = TARGET_CLONE_COUNT - existingClones.length;
+    
+    // Read custom target clones override if target_clones.json exists
+    let customTarget = 0;
+    try {
+      if (fs.existsSync('./target_clones.json')) {
+        const customConfig = JSON.parse(fs.readFileSync('./target_clones.json', 'utf8'));
+        if (customConfig[src.movie_uid]) {
+          customTarget = Number(customConfig[src.movie_uid]);
+        }
+      }
+    } catch (cfgErr) {}
 
-    if (neededCount <= 0) {
+    const targetClones = customTarget > 0 ? customTarget : (src.target_clones && src.target_clones > 0 ? src.target_clones : TARGET_CLONE_COUNT);
+    const neededCount = targetClones - existingClones.length;
+
+    if (neededCount < 0) {
+      const excessCount = Math.abs(neededCount);
+      console.log(`🗑️ [AUTO-TRIM] Target clones reduced for "${src.movie_uid}" (${src.quality}). Trimming ${excessCount} excess clone(s)...`);
+      const newClones = [...existingClones];
+      const trimmedIds = [];
+
+      const sa = SERVICE_ACCOUNTS[0];
+      const token = sa ? await getGoogleDriveTokenForSA(sa) : null;
+
+      for (let i = 0; i < excessCount; i++) {
+        const idToDelete = newClones.pop();
+        if (idToDelete) {
+          trimmedIds.push(idToDelete);
+          if (token) {
+            await deleteDriveShortcut(idToDelete, token);
+          }
+        }
+      }
+
+      const { error: updateErr } = await supabase
+        .from('movie_sources')
+        .update({ clone_file_ids: newClones })
+        .eq('id', src.id);
+
+      if (!updateErr) {
+        src.clone_file_ids = newClones;
+        console.log(`   ✂️ Deleted ${trimmedIds.length} excess shortcut(s) from Google Drive & updated DB (${newClones.length} remaining).`);
+      }
+      continue;
+    }
+
+    if (neededCount === 0) {
       skippedCount++;
       continue;
     }
 
-    console.log(`⚡ [CLONING] Movie UID: "${src.movie_uid}" (${src.quality}) | Primary ID: ${src.drive_file_id}`);
+    console.log(`⚡ [CLONING] Movie UID: "${src.movie_uid}" (${src.quality}) | Target Clones: ${targetClones} | Primary ID: ${src.drive_file_id}`);
     console.log(`   Existing Clones: ${existingClones.length} | Creating ${neededCount} new clone(s)...`);
 
     const newClones = [...existingClones];
     for (let c = 1; c <= neededCount; c++) {
       const cloneIndex = newClones.length + 1;
+      const cleanName = buildCleanShortcutName(src, cloneIndex);
       const startMs = Date.now();
-      const { id: clonedId, allBlacklisted } = await cloneDriveFile(src.drive_file_id, cloneIndex);
+      const { id: clonedId, allBlacklisted } = await cloneDriveFile(src.drive_file_id, cloneIndex, FOLDER_ID, cleanName);
 
       if (allBlacklisted) {
         console.warn(`\n🚨 ALL ${SERVICE_ACCOUNTS.length} SERVICE ACCOUNTS IN POOL HAVE REACHED GOOGLE DAILY COPY QUOTA.`);
@@ -347,6 +606,8 @@ async function startAutoCloningProcess() {
 
       await sleep(1000);
     }
+
+
 
     if (newClones.length > existingClones.length) {
       clonedCount++;

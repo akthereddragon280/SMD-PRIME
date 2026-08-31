@@ -7,14 +7,15 @@ import {
 } from 'lucide-react';
 import { 
   supabase, sanitizeTitle, getGlobalStreamingMode, setGlobalStreamingMode, 
-  getRolePolicies, setRolePolicies, DEFAULT_ROLE_POLICIES, updateUserRoleInSupabase 
+  getRolePolicies, setRolePolicies, DEFAULT_ROLE_POLICIES, updateUserRoleInSupabase,
+  updateMovieSourceCloneTarget
 } from '../supabaseClient';
 import { getAdminUserIds, addAdminUser, removeAdminUser } from '../utils/admin';
 import { openExternalLink, triggerHaptic } from '../utils/telegram';
 import { registerNodesFromDiagnostics } from '../utils/loadBalancer';
 
 export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
-  const [activeTab, setActiveTab] = useState('dashboard_analytics'); // 'dashboard_analytics', 'access_policy', 'health_logs'
+  const [activeTab, setActiveTab] = useState('dashboard_analytics'); // 'dashboard_analytics', 'access_policy', 'health_logs', 'clone_control'
   const [healthLogsSubTab, setHealthLogsSubTab] = useState('telemetry'); // 'telemetry' | 'watch_history'
   const [analyticsLogs, setAnalyticsLogs] = useState([]);
   const [watchLogs, setWatchLogs] = useState([]);
@@ -31,6 +32,12 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
       return [];
     }
   });
+
+  // Movie Clones Target Control State
+  const [movieSourcesList, setMovieSourcesList] = useState([]);
+  const [isSourcesLoading, setIsSourcesLoading] = useState(false);
+  const [sourcesSearchQuery, setSourcesSearchQuery] = useState('');
+  const [savingSourceId, setSavingSourceId] = useState(null);
 
   const [newAdminIdInput, setNewAdminIdInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -136,6 +143,160 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
       document.documentElement.style.overflow = origHtml;
     };
   }, []);
+
+  // Fetch Movie Sources for Target Clone Control
+  const fetchMovieSources = useCallback(async () => {
+    setIsSourcesLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('movie_sources')
+        .select(`
+          id,
+          movie_uid,
+          quality,
+          drive_file_id,
+          clone_file_ids,
+          created_at,
+          movies (
+            title,
+            release_year
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Fetch movie_sources error:', error.message);
+      }
+
+      if (data) {
+        // Hydrate target_clones from localStorage or default to 3
+        const hydrated = data.map(src => {
+          let savedTarget = 3;
+          try {
+            const localVal = localStorage.getItem(`smd_target_clones_${src.id}`);
+            if (localVal) savedTarget = Number(localVal);
+          } catch (e) {}
+          return {
+            ...src,
+            target_clones: src.target_clones || savedTarget || 3
+          };
+        });
+        setMovieSourcesList(hydrated);
+      }
+    } catch (e) {
+      console.warn('Fetch movie_sources error:', e);
+    } finally {
+      setIsSourcesLoading(false);
+    }
+  }, []);
+
+  // Group Movie Sources by Movie Title + Release Year + Language
+  const groupedMoviesList = useMemo(() => {
+    const map = new Map();
+
+    const inferLanguage = (uid, title) => {
+      const text = `${uid} ${title}`.toLowerCase();
+      if (text.includes('tamil')) return 'Tamil';
+      if (text.includes('telugu')) return 'Telugu';
+      if (text.includes('hindi')) return 'Hindi';
+      if (text.includes('malayalam')) return 'Malayalam';
+      if (text.includes('kannada')) return 'Kannada';
+      if (text.includes('english')) return 'English';
+      return 'Tamil';
+    };
+
+    for (const src of movieSourcesList) {
+      const movieObj = Array.isArray(src.movies) ? src.movies[0] : src.movies;
+      let rawTitle = movieObj?.title || src.movie_uid || 'Movie';
+      const cleanTitle = rawTitle.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const year = movieObj?.release_year || '';
+      const language = inferLanguage(src.movie_uid, cleanTitle);
+
+      const groupKey = `${cleanTitle.toLowerCase()}_${year}_${language.toLowerCase()}`;
+
+      if (!map.has(groupKey)) {
+        let savedTarget = 3;
+        try {
+          const localVal = localStorage.getItem(`smd_movie_target_clones_${groupKey}`);
+          if (localVal) savedTarget = Number(localVal);
+        } catch (e) {}
+
+        map.set(groupKey, {
+          groupKey,
+          movie_uid: src.movie_uid,
+          title: cleanTitle,
+          year,
+          language,
+          qualities: new Set(),
+          sources: [],
+          totalActiveClones: 0,
+          targetClones: src.target_clones || savedTarget || 3
+        });
+      }
+
+      const item = map.get(groupKey);
+      item.sources.push(src);
+      if (src.quality) item.qualities.add(src.quality);
+      const clonesCount = Array.isArray(src.clone_file_ids) ? src.clone_file_ids.length : 0;
+      item.totalActiveClones += clonesCount;
+    }
+
+    return Array.from(map.values());
+  }, [movieSourcesList]);
+
+  const handleUpdateGroupedMovieTargetClones = async (groupKey, currentTarget, delta) => {
+    triggerHaptic('medium');
+    const newTarget = Math.max(1, Math.min(20, (currentTarget || 3) + delta));
+    setSavingSourceId(groupKey);
+
+    // Instant LocalStorage 0ms update
+    try {
+      localStorage.setItem(`smd_movie_target_clones_${groupKey}`, String(newTarget));
+    } catch (e) {}
+
+    const group = groupedMoviesList.find(g => g.groupKey === groupKey);
+    if (group) {
+      const sourceIds = group.sources.map(s => s.id);
+      sourceIds.forEach(sid => {
+        try { localStorage.setItem(`smd_target_clones_${sid}`, String(newTarget)); } catch (e) {}
+      });
+
+      // ⚡ 2026 INSTANT DELETION ENGINE: Trims DB clone_file_ids array & updates UI instantly on decrement
+      setMovieSourcesList(prev => prev.map(s => {
+        if (!sourceIds.includes(s.id)) return s;
+        const currentClones = Array.isArray(s.clone_file_ids) ? s.clone_file_ids : [];
+        let updatedClones = currentClones;
+        
+        // If target was reduced below existing active clones count, trim excess clones instantly
+        if (delta < 0 && currentClones.length > newTarget) {
+          updatedClones = currentClones.slice(0, newTarget);
+          
+          // Async background DB trim update
+          supabase
+            .from('movie_sources')
+            .update({ clone_file_ids: updatedClones })
+            .eq('id', s.id)
+            .then(({ error }) => {
+              if (error) console.warn('Instant clone_file_ids trim DB note:', error.message);
+            })
+            .catch(() => {});
+        }
+
+        return {
+          ...s,
+          target_clones: newTarget,
+          clone_file_ids: updatedClones
+        };
+      }));
+
+      // Silent background sync for target_clones count
+      sourceIds.forEach(sid => {
+        updateMovieSourceCloneTarget(sid, newTarget).catch(() => {});
+      });
+    }
+
+    setTimeout(() => setSavingSourceId(null), 300);
+  };
 
   // Fetch & Aggregate Analytics
   const fetchFilteredAnalytics = useCallback(async (dateRange, quality) => {
@@ -293,6 +454,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
         }
 
         fetchFilteredAnalytics('all', 'all');
+        fetchMovieSources();
         runInfrastructureCheck();
       } catch (err) {
         console.warn('Admin data fetch note:', err);
@@ -520,6 +682,18 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
             >
               <Activity className="w-3.5 h-3.5" />
               <span>📡 Health & Audit Logs</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('clone_control')}
+              className={`flex-1 min-w-[140px] py-2 px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                activeTab === 'clone_control'
+                  ? 'bg-red-600 text-white shadow-md shadow-red-600/20 font-extrabold' 
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>⚡ Drive Clones</span>
             </button>
           </div>
         </div>
@@ -1267,6 +1441,147 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                     )}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* HUB 4: ⚡ GOOGLE DRIVE CLONE TARGET CONTROL */}
+          {activeTab === 'clone_control' && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="p-5 rounded-2xl border border-white/5 bg-zinc-900/30 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3 flex-wrap gap-2">
+                  <div>
+                    <h4 className="text-sm font-extrabold uppercase tracking-wider text-white flex items-center gap-2 font-heading">
+                      <Layers className="w-4 h-4 text-red-500" />
+                      Google Drive Target Clones Control
+                    </h4>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      Set custom target clone counts per movie record to scale streaming performance and prevent Google Drive quota exhaustion.
+                    </p>
+                  </div>
+                  <button
+                    onClick={fetchMovieSources}
+                    className="py-1.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-bold text-zinc-300 border border-white/10 flex items-center gap-1.5 transition-all"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Refresh
+                  </button>
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative">
+                  <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={sourcesSearchQuery}
+                    onChange={(e) => setSourcesSearchQuery(e.target.value)}
+                    placeholder="Search movie title, UID, or quality..."
+                    className="w-full bg-zinc-950 border border-white/10 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 transition-colors font-mono"
+                  />
+                </div>
+
+                {/* Grouped Movie Sources Table */}
+                <div className="overflow-x-auto rounded-xl border border-white/5">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-white/5 bg-zinc-900/60 text-[10px] font-bold uppercase text-zinc-400 font-mono">
+                        <th className="py-3 px-4">Movie Title & Language</th>
+                        <th className="py-3 px-4 text-center">Orig / All Files</th>
+                        <th className="py-3 px-4 text-center">Target Clones / File</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5 text-xs font-mono">
+                      {isSourcesLoading ? (
+                        <tr>
+                          <td colSpan="4" className="py-8 text-center text-zinc-500">
+                            Loading movie sources from Supabase...
+                          </td>
+                        </tr>
+                      ) : groupedMoviesList.filter(g => {
+                        if (!sourcesSearchQuery.trim()) return true;
+                        const term = sourcesSearchQuery.toLowerCase();
+                        return g.title.toLowerCase().includes(term) ||
+                          g.movie_uid.toLowerCase().includes(term) ||
+                          (g.language && g.language.toLowerCase().includes(term));
+                      }).length === 0 ? (
+                        <tr>
+                          <td colSpan="4" className="py-8 text-center text-zinc-500">
+                            No movies found matching query.
+                          </td>
+                        </tr>
+                      ) : (
+                        groupedMoviesList.filter(g => {
+                          if (!sourcesSearchQuery.trim()) return true;
+                          const term = sourcesSearchQuery.toLowerCase();
+                          return g.title.toLowerCase().includes(term) ||
+                            g.movie_uid.toLowerCase().includes(term) ||
+                            (g.language && g.language.toLowerCase().includes(term));
+                        }).map(group => {
+                          const isSaving = savingSourceId === group.groupKey;
+                          const numOriginal = group.sources.length;
+                          const numAllFiles = numOriginal + group.totalActiveClones;
+
+                          return (
+                            <tr key={group.groupKey} className="hover:bg-white/5 transition-colors">
+                              <td className="py-3 px-4 font-sans font-bold text-xs text-white">
+                                <div className="flex items-center gap-2">
+                                  <span>{group.title}</span>
+                                  {group.year && (
+                                    <span className="text-[10px] font-mono text-zinc-400 font-normal">
+                                      ({group.year})
+                                    </span>
+                                  )}
+                                  {group.language && (
+                                    <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded uppercase">
+                                      {group.language}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-zinc-500 font-mono mt-0.5">{group.movie_uid}</div>
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold text-xs" title={`Original Files: ${numOriginal} | Clone Files: ${group.totalActiveClones} | Total: ${numAllFiles}`}>
+                                  {numOriginal} / {numAllFiles}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => handleUpdateGroupedMovieTargetClones(group.groupKey, group.targetClones, -1)}
+                                    disabled={group.targetClones <= 1 || isSaving}
+                                    className="w-7 h-7 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-white font-black text-sm flex items-center justify-center transition-all active:scale-95 border border-white/10"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="w-8 text-center font-bold text-sm text-red-400">
+                                    {group.targetClones}
+                                  </span>
+                                  <button
+                                    onClick={() => handleUpdateGroupedMovieTargetClones(group.groupKey, group.targetClones, 1)}
+                                    disabled={group.targetClones >= 20 || isSaving}
+                                    className="w-7 h-7 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-white font-black text-sm flex items-center justify-center transition-all active:scale-95 border border-white/10"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <button
+                                  onClick={() => handleUpdateGroupedMovieTargetClones(group.groupKey, group.targetClones, 0)}
+                                  disabled={isSaving}
+                                  className="py-1 px-3 rounded-lg bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 text-[11px] font-bold transition-all active:scale-95"
+                                >
+                                  {isSaving ? 'Saving...' : '⚡ Saved'}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

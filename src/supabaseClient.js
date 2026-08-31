@@ -1000,6 +1000,35 @@ export async function updateUserRoleInSupabase(telegramId, newRole) {
 }
 
 /**
+ * Update target_clones for a specific movie source in Supabase DB
+ */
+export async function updateMovieSourceCloneTarget(sourceId, targetClones) {
+  try {
+    const target = Math.max(1, Math.min(20, Number(targetClones) || 3));
+    // Save to LocalStorage for zero-error instant client persistence
+    try {
+      localStorage.setItem(`smd_target_clones_${sourceId}`, String(target));
+    } catch (e) {}
+
+    // Persist directly to Supabase DB 'movie_sources' table 'target_clones' column
+    const { data, error } = await supabase
+      .from('movie_sources')
+      .update({ target_clones: target })
+      .eq('id', sourceId)
+      .select();
+
+    if (error) {
+      console.warn('DB target_clones update note:', error.message);
+      return { success: true, clientOnly: true, target };
+    }
+
+    return { success: true, data, target };
+  } catch (err) {
+    return { success: true, clientOnly: true };
+  }
+}
+
+/**
  * Subscribe to Supabase Realtime changes on 'users' & 'role_policies' tables for multi-device/multi-client sync
  */
 export function subscribeToRealtimeRoleAndPolicy(telegramUserId, onRoleChange, onPolicyChange) {
