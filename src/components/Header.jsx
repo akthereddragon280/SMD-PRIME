@@ -9,10 +9,12 @@ export default function Header({
   setDarkMode, 
   activeCategory, 
   setActiveCategory,
-  onOpenAdmin 
+  onOpenAdmin,
+  currentUserRole = 'normal'
 }) {
   const [showProfileCard, setShowProfileCard] = useState(false);
   const telegramUser = getTelegramUserInfo();
+  const isUserAdmin = (currentUserRole === 'admin') || isAdminUser(telegramUser?.id);
 
   const handleSearchClick = () => {
     triggerHaptic('light');
@@ -73,6 +75,21 @@ export default function Header({
 
           {/* Action Controls */}
           <div className="flex items-center gap-2">
+            {/* ⚡ Admin Command Center Button (Visible ONLY when user is Admin) */}
+            {isUserAdmin && (
+              <button
+                onClick={() => {
+                  triggerHaptic('medium');
+                  onOpenAdmin();
+                }}
+                className="py-1.5 px-3 rounded-full bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-[0_0_15px_rgba(239,68,68,0.5)] border border-red-400/40 hover:scale-105 active:scale-95 transition-all animate-pulse"
+                title="Open Admin Command Center"
+              >
+                <ShieldAlert className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span className="hidden sm:inline">Admin</span>
+              </button>
+            )}
+
             {/* Search Trigger */}
             <button
               onClick={handleSearchClick}
@@ -101,6 +118,17 @@ export default function Header({
 
             {/* Telegram User Indicator & Avatar Button */}
             <div className={`flex items-center gap-2 pl-2 border-l ${darkMode ? 'border-zinc-800' : 'border-slate-200'}`}>
+              {/* Dynamic User Role Badge Pill */}
+              <span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-full border shadow-xs flex items-center gap-1 ${
+                isUserAdmin
+                  ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                  : currentUserRole === 'vip' || currentUserRole === 'premium'
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : 'bg-zinc-800/80 text-zinc-400 border-zinc-700/50'
+              }`}>
+                {isUserAdmin ? '⚡ ADMIN' : currentUserRole === 'vip' || currentUserRole === 'premium' ? '👑 VIP' : '🎬 MEMBER'}
+              </span>
+
               <button
                 onClick={toggleProfileCard}
                 className="flex items-center gap-2 p-1 rounded-full hover:opacity-90 active:scale-95 transition-all group"

@@ -216,26 +216,36 @@ export default function App() {
     };
   }, []);
 
-  // Synchronize Adsterra Ad Engine with dynamic Role Policies & User Roles
+  // Dynamic Current User Role State ('normal' | 'vip' | 'admin')
+  const [currentUserRole, setCurrentUserRole] = useState('normal');
+
+  // Synchronize Adsterra Ad Engine & User Role with dynamic Role Policies & DB
   useEffect(() => {
     const tgUser = getTelegramUserInfo();
 
     const resolveUserRole = async () => {
-      const adminIds = getAdminUserIds();
       const isHashAdmin = typeof window !== 'undefined' && window.location.hash.includes('admin');
       
-      const tgUserIdNum = tgUser?.id ? Number(tgUser.id) : 0;
-      if (isAdminOpen || isHashAdmin || (tgUserIdNum > 0 && adminIds.includes(tgUserIdNum))) {
+      // Use canonical isAdminUser helper (handles Dev ID 0 and stored admin ID list)
+      if (isAdminOpen || isHashAdmin || isAdminUser(tgUser?.id)) {
         return 'admin';
       }
       if (tgUser?.id) {
-        return await getUserRoleFromSupabase(tgUser.id);
+        const dbRole = await getUserRoleFromSupabase(tgUser.id);
+        if (dbRole) return dbRole;
       }
       return 'normal';
     };
 
     const syncAdsForCurrentUser = async () => {
       const userRole = await resolveUserRole();
+      setCurrentUserRole(userRole || 'normal');
+
+      // Security Guard: Auto-close admin modal if user is no longer admin
+      if (userRole !== 'admin' && isAdminOpen) {
+        setIsAdminOpen(false);
+      }
+
       const policies = await getRolePolicies();
       const entitlements = getUserEntitlements(userRole, policies);
 
@@ -246,13 +256,20 @@ export default function App() {
 
     syncAdsForCurrentUser();
 
-    const handleSync = () => {
+    const handleSync = (e) => {
+      const updatedRole = e?.detail?.role;
+      if (updatedRole) {
+        setCurrentUserRole(updatedRole);
+      }
       syncAdsForCurrentUser();
     };
 
     const unsubscribeRealtime = subscribeToRealtimeRoleAndPolicy(
       tgUser?.id,
-      () => syncAdsForCurrentUser(),
+      (newRole) => {
+        if (newRole) setCurrentUserRole(newRole);
+        syncAdsForCurrentUser();
+      },
       () => syncAdsForCurrentUser()
     );
 
@@ -332,6 +349,7 @@ export default function App() {
           setDarkMode={setDarkMode}
           activeCategory={activeCategory}
           setActiveCategory={setActiveCategory}
+          currentUserRole={currentUserRole}
         />
 
         {/* Category Tab Pills (Zero-Glitch Dissolve Bar with Live File Counts) */}

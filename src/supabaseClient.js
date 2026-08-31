@@ -883,19 +883,19 @@ export function getUserEntitlements(userRole = 'normal', activePolicies = null) 
 }
 
 /**
- * Fetch all registered Telegram Users for Admin Role Management
+ * Fetch all registered Telegram Users for Admin Role Management directly from canonical 'users' table
  */
 export async function fetchAllTelegramUsersFromSupabase() {
   try {
     const { data, error } = await supabase
-      .from('telegram_users')
+      .from('users')
       .select('*')
-      .order('updated_at', { ascending: false });
+      .order('created_at', { ascending: false });
 
     if (error) throw error;
     return data || [];
   } catch (err) {
-    console.warn('Fetch telegram_users error:', err.message);
+    console.warn('Fetch users error:', err.message);
     return [];
   }
 }
@@ -908,7 +908,6 @@ export async function getUserRoleFromSupabase(telegramUserId) {
   const userIdInt = normalizeTelegramUserIdInt(telegramUserId);
 
   try {
-    // 1. Primary: Query canonical 'users' table
     const { data: userRow } = await supabase
       .from('users')
       .select('role')
@@ -918,18 +917,6 @@ export async function getUserRoleFromSupabase(telegramUserId) {
 
     if (userRow && userRow.role) {
       return userRow.role.toLowerCase();
-    }
-
-    // 2. Secondary Fallback: Query 'telegram_users' table if present
-    const { data: tgRow } = await supabase
-      .from('telegram_users')
-      .select('role')
-      .eq('telegram_user_id', userIdInt)
-      .limit(1)
-      .maybeSingle();
-
-    if (tgRow && tgRow.role) {
-      return tgRow.role.toLowerCase();
     }
   } catch (err) {
     console.warn('getUserRoleFromSupabase error:', err);
@@ -944,44 +931,45 @@ export async function getUserRoleFromSupabase(telegramUserId) {
  */
 export async function updateUserRoleInSupabase(telegramId, newRole) {
   try {
-    if (!telegramId) return { success: false, error: 'Missing telegramId' };
-    const role = (newRole || 'normal').toLowerCase();
-    const idNum = Number(telegramId) || 0;
-    const targetId = idNum || Number(telegramId);
+    if (!telegramId && telegramId !== 0) return { success: false, error: 'Missing telegramId' };
+    
+    // Strict Whitelist Sanitization Engine
+    let role = (newRole || 'normal').toLowerCase().trim();
+    const VALID_ROLES = ['normal', 'vip', 'premium', 'admin'];
+    if (!VALID_ROLES.includes(role)) {
+      console.warn(`[RBAC Guard] Invalid role '${newRole}' provided. Falling back to 'normal'.`);
+      role = 'normal';
+    }
+    // Standardize 'premium' to 'vip'
+    if (role === 'premium') role = 'vip';
 
-    // 1. Primary: Update 'users' table (Only valid columns: telegram_user_id, role)
-    const { data: usersData, error: err1 } = await supabase
+    const idStr = String(telegramId).trim();
+    const idNum = Number(idStr);
+    const validId = isNaN(idNum) ? idStr : idNum;
+
+    // Primary: Update 'users' table matching both string & number representations
+    let { data: usersData, error: err1 } = await supabase
       .from('users')
       .update({ role: role })
-      .eq('telegram_user_id', targetId)
+      .eq('telegram_user_id', validId)
       .select();
 
     if (err1 || !usersData || usersData.length === 0) {
-      // Fallback upsert without extra columns like updated_at
-      await supabase
+      // Fallback query with string match if number match returned 0 rows
+      const { data: retryData, error: errRetry } = await supabase
         .from('users')
-        .upsert({ telegram_user_id: targetId, role: role }, { onConflict: 'telegram_user_id' });
-    }
+        .update({ role: role })
+        .eq('telegram_user_id', idStr)
+        .select();
 
-    // 2. Secondary: Update or Upsert 'telegram_users' table if present
-    try {
-      const { error: err2 } = await supabase
-        .from('telegram_users')
-        .update({ role: role, updated_at: new Date().toISOString() })
-        .eq('telegram_user_id', targetId);
+      usersData = retryData;
 
-      if (err2) {
+      if (errRetry || !retryData || retryData.length === 0) {
+        // Fallback upsert
         await supabase
-          .from('telegram_users')
-          .upsert({
-            telegram_user_id: targetId,
-            telegram_id: targetId,
-            role: role,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'telegram_user_id' });
+          .from('users')
+          .upsert({ telegram_user_id: validId, role: role }, { onConflict: 'telegram_user_id' });
       }
-    } catch (e2) {
-      console.warn('telegram_users table role update note:', e2);
     }
 
     // Broadcast live role change event across window & document for 0ms UI update

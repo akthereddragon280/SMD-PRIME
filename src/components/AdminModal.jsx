@@ -131,6 +131,12 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState(null); // User object for Contextual Slide-out Drawer
   const [userToRevoke, setUserToRevoke] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
+
+  const triggerToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   // Lock body scroll
   useEffect(() => {
@@ -193,17 +199,21 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
     }
   }, []);
 
-  // ⚡ 0-LATENCY REALTIME SYNC: Subscribe to Postgres changes on 'movie_sources' table
+  // ⚡ 0-LATENCY REALTIME SYNC: Subscribe to Postgres changes on 'movie_sources' and 'users' tables
   useEffect(() => {
     fetchMovieSources();
 
-    const channelId = `admin_realtime_sources_${Math.random().toString(36).substring(2, 9)}`;
+    const channelId = `admin_realtime_sync_${Math.random().toString(36).substring(2, 9)}`;
     const channel = supabase.channel(channelId);
 
     channel
       .on('postgres_changes', { event: '*', schema: 'public', table: 'movie_sources' }, () => {
         console.log('⚡ [Realtime Admin Sync] movie_sources table changed in Supabase DB! Reloading live sources...');
         fetchMovieSources();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+        console.log('⚡ [Realtime Admin Sync] users table changed in Supabase DB! Reloading registered users...');
+        if (typeof fetchUsers === 'function') fetchUsers();
       })
       .subscribe();
 
@@ -1227,7 +1237,9 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {filteredUsers.map(user => {
                     const isSuper = Number(user.telegram_user_id) === 0;
-                    const isAdmin = user.role === 'admin' || adminIds.includes(Number(user.telegram_user_id));
+                    const uRole = (user.role || 'normal').toLowerCase();
+                    const isAdmin = uRole === 'admin';
+                    const isVip = uRole === 'vip' || uRole === 'premium';
                     const isBanned = bannedUserIds.includes(Number(user.telegram_user_id));
                     const userName = user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : user.username || `User #${user.telegram_user_id}`;
 
@@ -1242,7 +1254,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                               ? 'bg-red-950/20 border-red-500/40 opacity-75'
                               : isAdmin
                               ? 'bg-zinc-900/90 border-red-500/30'
-                              : user.role === 'premium'
+                              : isVip
                                 ? 'bg-gradient-to-br from-amber-950/20 to-zinc-900/90 border-amber-500/30'
                                 : 'bg-zinc-900/50 border-white/5 hover:border-white/20'
                         }`}
@@ -1276,8 +1288,8 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                             </span>
                           ) : isAdmin ? (
                             <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-red-500/20 text-red-400 border border-red-500/30 rounded-md">ADMIN</span>
-                          ) : user.role === 'premium' ? (
-                            <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-md">⭐ PREMIUM</span>
+                          ) : isVip ? (
+                            <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-md">⭐ VIP</span>
                           ) : (
                             <span className="px-2 py-0.5 text-[9px] font-bold uppercase bg-zinc-800 text-zinc-400 border border-white/5 rounded-md">NORMAL</span>
                           )}
@@ -1657,63 +1669,85 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                 <div className="space-y-3 pt-4 border-t border-white/10">
                   <h5 className="text-xs font-black uppercase text-zinc-400 tracking-wider">User Role & Privileges</h5>
 
-                  {/* 3-Way Role Selector (Normal | Premium | Admin) */}
-                  <div className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-zinc-950 border border-white/10">
-                    <button
-                      onClick={async () => {
-                        const tgId = selectedUser.telegram_user_id || selectedUser.telegram_id || selectedUser.id;
-                        const res = await updateUserRoleInSupabase(tgId, 'normal');
-                        if (res.success) {
-                          setRegisteredUsers(prev => prev.map(u => (u.id === selectedUser.id || u.telegram_user_id === tgId) ? { ...u, role: 'normal' } : u));
-                          setSelectedUser(prev => ({ ...prev, role: 'normal' }));
-                        }
-                      }}
-                      className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all ${
-                        (selectedUser.role || 'normal') === 'normal'
-                          ? 'bg-zinc-800 text-white shadow-md ring-1 ring-white/20'
-                          : 'text-zinc-500 hover:text-zinc-300'
-                      }`}
-                    >
-                      Normal
-                    </button>
+                  {/* 3-Way Role Selector (Normal | VIP | Admin) - 0ms Optimistic Instant Switch */}
+                  {(() => {
+                    const tgId = selectedUser.telegram_user_id || selectedUser.telegram_id || selectedUser.id;
+                    const rawRole = (selectedUser.role || '').toLowerCase();
+                    const activeRole = rawRole === 'admin' 
+                      ? 'admin' 
+                      : (rawRole === 'vip' || rawRole === 'premium') 
+                      ? 'vip' 
+                      : (adminIds.includes(Number(tgId)) || adminIds.includes(String(tgId))) 
+                      ? 'admin' 
+                      : 'normal';
 
-                    <button
-                      onClick={async () => {
-                        const tgId = selectedUser.telegram_user_id || selectedUser.telegram_id || selectedUser.id;
-                        const res = await updateUserRoleInSupabase(tgId, 'premium');
-                        if (res.success) {
-                          setRegisteredUsers(prev => prev.map(u => (u.id === selectedUser.id || u.telegram_user_id === tgId) ? { ...u, role: 'premium' } : u));
-                          setSelectedUser(prev => ({ ...prev, role: 'premium' }));
-                        }
-                      }}
-                      className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all ${
-                        selectedUser.role === 'premium'
-                          ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-lg ring-1 ring-amber-400'
-                          : 'text-amber-400/70 hover:text-amber-400'
-                      }`}
-                    >
-                      ⭐ Premium
-                    </button>
+                    const isNormalActive = activeRole === 'normal';
+                    const isVipActive = activeRole === 'vip';
+                    const isAdminActive = activeRole === 'admin';
 
-                    <button
-                      onClick={async () => {
-                        const tgId = selectedUser.telegram_user_id || selectedUser.telegram_id || selectedUser.id;
-                        const res = await updateUserRoleInSupabase(tgId, 'admin');
-                        if (res.success) {
-                          setRegisteredUsers(prev => prev.map(u => (u.id === selectedUser.id || u.telegram_user_id === tgId) ? { ...u, role: 'admin' } : u));
-                          setSelectedUser(prev => ({ ...prev, role: 'admin' }));
-                          if (tgId) handleToggleAdmin(tgId);
-                        }
-                      }}
-                      className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all ${
-                        selectedUser.role === 'admin' || adminIds.includes(Number(selectedUser.telegram_user_id || selectedUser.id))
-                          ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg ring-1 ring-red-400'
-                          : 'text-red-400/70 hover:text-red-400'
-                      }`}
-                    >
-                      👑 Admin
-                    </button>
-                  </div>
+                    const handleRoleChange = async (targetRole) => {
+                      // 1. Instant 0ms Optimistic UI Update (Visual Switch)
+                      setSelectedUser(prev => ({ ...prev, role: targetRole }));
+                      setRegisteredUsers(prev => prev.map(u => 
+                        (String(u.id) === String(selectedUser.id) || String(u.telegram_user_id) === String(tgId))
+                          ? { ...u, role: targetRole }
+                          : u
+                      ));
+
+                      if (targetRole === 'admin') {
+                        addAdminUser(tgId);
+                        setAdminIds(prev => Array.from(new Set([...prev, Number(tgId)])));
+                      } else {
+                        removeAdminUser(tgId);
+                        setAdminIds(prev => prev.filter(id => String(id) !== String(tgId)));
+                      }
+
+                      triggerToast(`Role updated to ${targetRole.toUpperCase()} in Supabase DB`);
+
+                      // 2. Background Persistence to Supabase DB
+                      const res = await updateUserRoleInSupabase(tgId, targetRole);
+                      if (!res.success) {
+                        console.warn('[RBAC Sync] Failed to persist role change to DB:', res.error);
+                      }
+                    };
+
+                    return (
+                      <div className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-zinc-950 border border-white/10">
+                        <button
+                          onClick={() => handleRoleChange('normal')}
+                          className={`py-2.5 px-2 rounded-xl text-[11px] font-black transition-all cursor-pointer ${
+                            isNormalActive
+                              ? 'bg-zinc-800 text-white shadow-md ring-1 ring-white/20 scale-[1.02]'
+                              : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                          }`}
+                        >
+                          Normal
+                        </button>
+
+                        <button
+                          onClick={() => handleRoleChange('vip')}
+                          className={`py-2.5 px-2 rounded-xl text-[11px] font-black transition-all cursor-pointer ${
+                            isVipActive
+                              ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-lg ring-1 ring-amber-400 scale-[1.02]'
+                              : 'text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10'
+                          }`}
+                        >
+                          ⭐ VIP
+                        </button>
+
+                        <button
+                          onClick={() => handleRoleChange('admin')}
+                          className={`py-2.5 px-2 rounded-xl text-[11px] font-black transition-all cursor-pointer ${
+                            isAdminActive
+                              ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg ring-1 ring-red-400 scale-[1.02]'
+                              : 'text-red-400/70 hover:text-red-400 hover:bg-red-500/10'
+                          }`}
+                        >
+                          👑 Admin
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                   {/* Ban/Unban User Button */}
                   {Number(selectedUser.telegram_user_id) !== 0 && (
@@ -1740,6 +1774,14 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                 Close Profile
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Dynamic RBAC Micro-Toast Banner Notification */}
+        {toastMessage && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-zinc-900 to-black text-white text-xs font-bold font-mono border border-emerald-500/40 shadow-2xl shadow-emerald-500/20 flex items-center gap-2 animate-bounce">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+            <span>{toastMessage}</span>
           </div>
         )}
 
