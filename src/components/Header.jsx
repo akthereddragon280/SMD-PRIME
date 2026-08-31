@@ -75,21 +75,6 @@ export default function Header({
 
           {/* Action Controls */}
           <div className="flex items-center gap-2">
-            {/* ⚡ Admin Command Center Button (Visible ONLY when user is Admin) */}
-            {isUserAdmin && (
-              <button
-                onClick={() => {
-                  triggerHaptic('medium');
-                  onOpenAdmin();
-                }}
-                className="py-1.5 px-3 rounded-full bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-[0_0_15px_rgba(239,68,68,0.5)] border border-red-400/40 hover:scale-105 active:scale-95 transition-all animate-pulse"
-                title="Open Admin Command Center"
-              >
-                <ShieldAlert className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span className="hidden sm:inline">Admin</span>
-              </button>
-            )}
-
             {/* Search Trigger */}
             <button
               onClick={handleSearchClick}
@@ -116,32 +101,41 @@ export default function Header({
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
 
-            {/* Telegram User Indicator & Avatar Button */}
+            {/* Telegram User Avatar Button with Dynamic Circle Indicator (Red = Normal, Gold = VIP, Green = Admin) */}
             <div className={`flex items-center gap-2 pl-2 border-l ${darkMode ? 'border-zinc-800' : 'border-slate-200'}`}>
-              {/* Dynamic User Role Badge Pill */}
-              <span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-full border shadow-xs flex items-center gap-1 ${
-                isUserAdmin
-                  ? 'bg-red-500/10 text-red-400 border-red-500/30'
-                  : currentUserRole === 'vip' || currentUserRole === 'premium'
-                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                  : 'bg-zinc-800/80 text-zinc-400 border-zinc-700/50'
-              }`}>
-                {isUserAdmin ? '⚡ ADMIN' : currentUserRole === 'vip' || currentUserRole === 'premium' ? '👑 VIP' : '🎬 MEMBER'}
-              </span>
-
               <button
-                onClick={toggleProfileCard}
-                className="flex items-center gap-2 p-1 rounded-full hover:opacity-90 active:scale-95 transition-all group"
-                title="View Account"
+                onClick={(e) => {
+                  if (isUserAdmin) {
+                    triggerHaptic('medium');
+                    onOpenAdmin();
+                  } else {
+                    triggerHaptic('light');
+                    toggleProfileCard();
+                  }
+                }}
+                className="flex items-center gap-2 p-1 rounded-full hover:opacity-90 active:scale-95 transition-all group relative cursor-pointer"
+                title={isUserAdmin ? "Click to Open Admin Command Center" : "View Account Profile"}
               >
                 {userPhoto ? (
                   <img 
                     src={userPhoto} 
                     alt={userName} 
-                    className="w-8 h-8 rounded-full border-2 border-red-500 object-cover shadow-sm ring-2 ring-red-500/20 group-hover:ring-red-500/40 transition-all"
+                    className={`w-8 h-8 rounded-full border-2 object-cover transition-all ${
+                      isUserAdmin
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.5)] group-hover:ring-emerald-400'
+                        : currentUserRole === 'vip' || currentUserRole === 'premium'
+                        ? 'border-amber-400 ring-2 ring-amber-400/40 shadow-[0_0_12px_rgba(251,191,36,0.5)] group-hover:ring-amber-300'
+                        : 'border-red-500 ring-2 ring-red-500/30 group-hover:ring-red-400'
+                    }`}
                   />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-red-600 via-rose-600 to-amber-500 text-white border-2 border-red-400 flex items-center justify-center text-xs font-black shadow-sm ring-2 ring-red-500/20">
+                  <div className={`w-8 h-8 rounded-full text-white border-2 flex items-center justify-center text-xs font-black transition-all ${
+                    isUserAdmin
+                      ? 'bg-gradient-to-tr from-emerald-700 via-teal-600 to-emerald-400 border-emerald-400 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.5)]'
+                      : currentUserRole === 'vip' || currentUserRole === 'premium'
+                      ? 'bg-gradient-to-tr from-amber-600 via-orange-500 to-yellow-400 border-amber-300 ring-2 ring-amber-400/40 shadow-[0_0_12px_rgba(251,191,36,0.5)]'
+                      : 'bg-gradient-to-tr from-red-600 via-rose-600 to-red-400 border-red-400 ring-2 ring-red-500/30'
+                  }`}>
                     {userName.charAt(0).toUpperCase()}
                   </div>
                 )}
