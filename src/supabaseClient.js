@@ -899,6 +899,44 @@ export async function fetchAllTelegramUsersFromSupabase() {
 }
 
 /**
+ * Fetch a user's current role directly from the canonical 'users' table in Supabase
+ */
+export async function getUserRoleFromSupabase(telegramUserId) {
+  if (!telegramUserId) return 'normal';
+  const userIdInt = normalizeTelegramUserIdInt(telegramUserId);
+
+  try {
+    // 1. Primary: Query canonical 'users' table
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('role')
+      .eq('telegram_user_id', userIdInt)
+      .limit(1)
+      .maybeSingle();
+
+    if (userRow && userRow.role) {
+      return userRow.role.toLowerCase();
+    }
+
+    // 2. Secondary Fallback: Query 'telegram_users' table if present
+    const { data: tgRow } = await supabase
+      .from('telegram_users')
+      .select('role')
+      .eq('telegram_user_id', userIdInt)
+      .limit(1)
+      .maybeSingle();
+
+    if (tgRow && tgRow.role) {
+      return tgRow.role.toLowerCase();
+    }
+  } catch (err) {
+    console.warn('getUserRoleFromSupabase error:', err);
+  }
+
+  return 'normal';
+}
+
+/**
  * Update a user's role (normal, premium, admin) in Supabase DB
  * Performs fail-safe upsert matching exact Supabase 'users' table schema (id, telegram_user_id, role)
  */
@@ -944,11 +982,15 @@ export async function updateUserRoleInSupabase(telegramId, newRole) {
       console.warn('telegram_users table role update note:', e2);
     }
 
-    // Broadcast live role change event to UI
-    const evt = new CustomEvent('smd_user_role_updated', { 
-      detail: { telegram_user_id: targetId, role: role } 
-    });
-    window.dispatchEvent(evt);
+    // Broadcast live role change event across window & document for 0ms UI update
+    const eventData = { telegram_user_id: targetId, role: role };
+    const evt1 = new CustomEvent('smd_user_role_updated', { detail: eventData });
+    const evt2 = new CustomEvent('smd_user_role_changed', { detail: eventData });
+    
+    window.dispatchEvent(evt1);
+    document.dispatchEvent(evt1);
+    window.dispatchEvent(evt2);
+    document.dispatchEvent(evt2);
 
     return { success: true };
   } catch (err) {
@@ -956,5 +998,40 @@ export async function updateUserRoleInSupabase(telegramId, newRole) {
     return { success: false, error: err.message };
   }
 }
+
+/**
+ * Subscribe to Supabase Realtime changes on 'users' & 'role_policies' tables for multi-device/multi-client sync
+ */
+export function subscribeToRealtimeRoleAndPolicy(telegramUserId, onRoleChange, onPolicyChange) {
+  const channel = supabase.channel('realtime_role_policy_sync');
+
+  channel
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'role_policies' }, async () => {
+      console.log('⚡ [Realtime] Policy change detected from Supabase DB! Reloading policies...');
+      const freshPolicies = await getRolePolicies();
+      if (onPolicyChange) onPolicyChange(freshPolicies);
+      const evt = new CustomEvent('smd_role_policies_changed', { detail: freshPolicies });
+      window.dispatchEvent(evt);
+      document.dispatchEvent(evt);
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async (payload) => {
+      const updatedUserId = payload.new?.telegram_user_id;
+      const updatedRole = payload.new?.role;
+
+      if (telegramUserId && Number(updatedUserId) === Number(telegramUserId)) {
+        console.log(`⚡ [Realtime] User role update detected for current user #${updatedUserId}: -> ${updatedRole}`);
+        if (onRoleChange && updatedRole) onRoleChange(updatedRole);
+        const evt = new CustomEvent('smd_user_role_updated', { detail: { telegram_user_id: updatedUserId, role: updatedRole } });
+        window.dispatchEvent(evt);
+        document.dispatchEvent(evt);
+      }
+    })
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
 
 

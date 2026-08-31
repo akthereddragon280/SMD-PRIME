@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching, getCachedMovies, getGlobalStreamingMode, sortMoviesWithPosterPriority, getRolePolicies, getUserEntitlements } from './supabaseClient';
+import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching, getCachedMovies, getGlobalStreamingMode, sortMoviesWithPosterPriority, getRolePolicies, getUserEntitlements, getUserRoleFromSupabase, subscribeToRealtimeRoleAndPolicy } from './supabaseClient';
 import Header from './components/Header';
 import HeroBanner from './components/HeroBanner';
 import MovieRow from './components/MovieRow';
@@ -178,6 +178,7 @@ export default function App() {
         setMoviesList([]);
         setIsLiveDatabase(false);
       }
+
       setIsLoadingSupabase(false);
     }
 
@@ -215,10 +216,11 @@ export default function App() {
     };
   }, []);
 
-  // Synchronize Adsterra Ad Engine with dynamic Role Policies
+  // Synchronize Adsterra Ad Engine with dynamic Role Policies & User Roles
   useEffect(() => {
-    const resolveUserRole = () => {
-      const tgUser = getTelegramUserInfo();
+    const tgUser = getTelegramUserInfo();
+
+    const resolveUserRole = async () => {
       const adminIds = getAdminUserIds();
       const isHashAdmin = typeof window !== 'undefined' && window.location.hash.includes('admin');
       
@@ -226,11 +228,14 @@ export default function App() {
       if (isAdminOpen || isHashAdmin || (tgUserIdNum > 0 && adminIds.includes(tgUserIdNum))) {
         return 'admin';
       }
-      return tgUser?.role || 'normal';
+      if (tgUser?.id) {
+        return await getUserRoleFromSupabase(tgUser.id);
+      }
+      return 'normal';
     };
 
     const syncAdsForCurrentUser = async () => {
-      const userRole = resolveUserRole();
+      const userRole = await resolveUserRole();
       const policies = await getRolePolicies();
       const entitlements = getUserEntitlements(userRole, policies);
 
@@ -241,19 +246,31 @@ export default function App() {
 
     syncAdsForCurrentUser();
 
-    const handlePolicyChange = (e) => {
-      const userRole = resolveUserRole();
-      const policies = e?.detail || {};
-      const entitlements = getUserEntitlements(userRole, policies);
-      const shouldEnable = userRole === 'admin' ? false : (entitlements.enable_ads !== false);
-      syncAdEngine(shouldEnable);
+    const handleSync = () => {
+      syncAdsForCurrentUser();
     };
 
-    window.addEventListener('smd_role_policies_changed', handlePolicyChange);
-    document.addEventListener('smd_role_policies_changed', handlePolicyChange);
+    const unsubscribeRealtime = subscribeToRealtimeRoleAndPolicy(
+      tgUser?.id,
+      () => syncAdsForCurrentUser(),
+      () => syncAdsForCurrentUser()
+    );
+
+    window.addEventListener('smd_role_policies_changed', handleSync);
+    document.addEventListener('smd_role_policies_changed', handleSync);
+    window.addEventListener('smd_user_role_updated', handleSync);
+    window.addEventListener('smd_user_role_changed', handleSync);
+    document.addEventListener('smd_user_role_updated', handleSync);
+    document.addEventListener('smd_user_role_changed', handleSync);
+
     return () => {
-      window.removeEventListener('smd_role_policies_changed', handlePolicyChange);
-      document.removeEventListener('smd_role_policies_changed', handlePolicyChange);
+      if (unsubscribeRealtime) unsubscribeRealtime();
+      window.removeEventListener('smd_role_policies_changed', handleSync);
+      document.removeEventListener('smd_role_policies_changed', handleSync);
+      window.removeEventListener('smd_user_role_updated', handleSync);
+      window.removeEventListener('smd_user_role_changed', handleSync);
+      document.removeEventListener('smd_user_role_updated', handleSync);
+      document.removeEventListener('smd_user_role_changed', handleSync);
     };
   }, [isAdminOpen]);
 

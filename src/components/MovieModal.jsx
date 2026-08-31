@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Play, Star, Clock, Calendar, Download, ShieldCheck, Film, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
+import { ArrowLeft, Play, Star, Clock, Calendar, Download, ShieldCheck, Film, CheckCircle2, Sparkles, Loader2, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase, logDownloadAnalytics, formatDurationString, getRolePolicies, getUserEntitlements, DEFAULT_ROLE_POLICIES } from '../supabaseClient';
+import { supabase, logDownloadAnalytics, formatDurationString, getRolePolicies, getUserEntitlements, DEFAULT_ROLE_POLICIES, getUserRoleFromSupabase, subscribeToRealtimeRoleAndPolicy } from '../supabaseClient';
 import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 import { getExactMovieDuration } from '../utils/posters';
@@ -34,8 +34,15 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
         setStreamingMode(mode);
       } catch (e) {}
     };
+
     const handlePolicyChange = (e) => {
       if (e?.detail) setRolePolicies(e.detail);
+    };
+
+    const handleRoleChange = (e) => {
+      if (e?.detail?.role) {
+        setUserRole(e.detail.role.toLowerCase());
+      }
     };
 
     getRolePolicies().then(policies => {
@@ -44,23 +51,33 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
 
     const tgUser = getTelegramUserInfo();
     if (tgUser?.id) {
-      supabase
-        .from('telegram_users')
-        .select('role')
-        .eq('telegram_id', String(tgUser.id))
-        .maybeSingle()
-        .then(({ data }) => {
-          if (data && data.role) setUserRole(data.role);
-        });
+      getUserRoleFromSupabase(tgUser.id).then(r => setUserRole(r));
     }
+
+    // Subscribe to Supabase Realtime DB events (multi-device / live admin updates)
+    const unsubscribeRealtime = subscribeToRealtimeRoleAndPolicy(
+      tgUser?.id,
+      (newRole) => setUserRole(newRole),
+      (newPolicies) => setRolePolicies(newPolicies)
+    );
 
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('smd_streaming_mode_changed', handleStorageChange);
     window.addEventListener('smd_role_policies_changed', handlePolicyChange);
+    window.addEventListener('smd_user_role_updated', handleRoleChange);
+    window.addEventListener('smd_user_role_changed', handleRoleChange);
+    document.addEventListener('smd_user_role_updated', handleRoleChange);
+    document.addEventListener('smd_user_role_changed', handleRoleChange);
+
     return () => {
+      if (unsubscribeRealtime) unsubscribeRealtime();
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('smd_streaming_mode_changed', handleStorageChange);
       window.removeEventListener('smd_role_policies_changed', handlePolicyChange);
+      window.removeEventListener('smd_user_role_updated', handleRoleChange);
+      window.removeEventListener('smd_user_role_changed', handleRoleChange);
+      document.removeEventListener('smd_user_role_updated', handleRoleChange);
+      document.removeEventListener('smd_user_role_changed', handleRoleChange);
     };
   }, []);
 
@@ -548,30 +565,49 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
 
             {/* Primary Action Button (Play vs Download Only) */}
             {activeHeroSource ? (
-              <button
-                onClick={() => handlePlayClick(activeHeroSource)}
-                className={`w-full flex items-center justify-center gap-3 font-black text-sm py-4 px-6 rounded-2xl shadow-xl transition active:scale-[0.98] ${
-                  streamingMode === 'download_only'
-                    ? 'bg-gradient-to-r from-amber-600 via-amber-500 to-orange-600 hover:brightness-110 text-white shadow-amber-600/35 border border-amber-400/30'
-                    : 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 hover:brightness-110 text-white shadow-red-600/35 border border-red-400/30'
-                }`}
-              >
-                {streamingMode === 'download_only' ? (
-                  <>
-                    <Download className="w-5 h-5 ml-0.5" />
-                    <span>
-                      Download Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-5 h-5 fill-white ml-0.5" />
-                    <span>
-                      Play Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
-                    </span>
-                  </>
-                )}
-              </button>
+              (() => {
+                const currentEntitlements = getUserEntitlements(userRole, rolePolicies);
+                const hasDownloadAccess = currentEntitlements.download_access !== false;
+
+                if (streamingMode === 'download_only' && !hasDownloadAccess) {
+                  return (
+                    <button
+                      onClick={() => handleDownloadClick(activeHeroSource)}
+                      className="w-full flex items-center justify-center gap-2.5 font-extrabold text-xs py-4 px-6 rounded-2xl bg-zinc-900/90 border border-amber-500/40 text-amber-400 shadow-xl transition active:scale-[0.98]"
+                    >
+                      <Lock className="w-4 h-4 text-amber-400" />
+                      <span>🔒 Direct Downloads Disabled for {userRole.toUpperCase()} Role (Upgrade for Access)</span>
+                    </button>
+                  );
+                }
+
+                return (
+                  <button
+                    onClick={() => handlePlayClick(activeHeroSource)}
+                    className={`w-full flex items-center justify-center gap-3 font-black text-sm py-4 px-6 rounded-2xl shadow-xl transition active:scale-[0.98] ${
+                      streamingMode === 'download_only'
+                        ? 'bg-gradient-to-r from-amber-600 via-amber-500 to-orange-600 hover:brightness-110 text-white shadow-amber-600/35 border border-amber-400/30'
+                        : 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 hover:brightness-110 text-white shadow-red-600/35 border border-red-400/30'
+                    }`}
+                  >
+                    {streamingMode === 'download_only' ? (
+                      <>
+                        <Download className="w-5 h-5 ml-0.5" />
+                        <span>
+                          Download Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-5 h-5 fill-white ml-0.5" />
+                        <span>
+                          Play Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
+                        </span>
+                      </>
+                    )}
+                  </button>
+                );
+              })()
             ) : (
               <div className={`w-full text-center py-4 text-xs font-bold rounded-2xl border ${
                 darkMode ? 'bg-red-950/40 text-red-400 border-red-500/30' : 'bg-red-50 text-red-600 border-red-200'
@@ -639,6 +675,9 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                 const isActive = activeHeroSource && (activeHeroSource.id === src.id || activeHeroSource.drive_file_id === src.drive_file_id);
                 const { res, tag, codec } = parseCleanQualityBadge(src.quality);
                 const finalCodec = src.video_codec || codec || '';
+
+                const currentEntitlements = getUserEntitlements(userRole, rolePolicies);
+                const hasDownloadAccess = currentEntitlements.download_access !== false;
 
                 return (
                   <div
@@ -715,13 +754,23 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
 
                     <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                       {streamingMode === 'download_only' ? (
-                        <button
-                          onClick={() => handleDownloadClick(src)}
-                          className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-extrabold rounded-xl transition shadow-md shadow-amber-600/30 flex items-center gap-1.5 active:scale-95"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Download Now</span>
-                        </button>
+                        hasDownloadAccess ? (
+                          <button
+                            onClick={() => handleDownloadClick(src)}
+                            className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-extrabold rounded-xl transition shadow-md shadow-amber-600/30 flex items-center gap-1.5 active:scale-95"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Download Now</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleDownloadClick(src)}
+                            className="px-3.5 py-2 bg-zinc-900 text-amber-400 border border-amber-500/30 text-xs font-extrabold rounded-xl transition flex items-center gap-1.5 active:scale-95"
+                          >
+                            <Lock className="w-3.5 h-3.5 text-amber-400" />
+                            <span>🔒 Premium Only</span>
+                          </button>
+                        )
                       ) : !isExceedingLimit ? (
                         <button
                           onClick={() => handlePlayClick(src)}
@@ -733,9 +782,14 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                       ) : (
                         <button
                           onClick={() => handleDownloadClick(src)}
-                          className="px-3 py-1.5 text-[11px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition"
+                          className={`px-3 py-1.5 text-[11px] font-mono font-bold rounded-xl transition flex items-center gap-1 ${
+                            hasDownloadAccess
+                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20'
+                              : 'bg-zinc-900 text-amber-400/80 border border-amber-500/30'
+                          }`}
                         >
-                          Download Now
+                          {!hasDownloadAccess && <Lock className="w-3 h-3 text-amber-400" />}
+                          <span>{hasDownloadAccess ? 'Download Now' : '🔒 Premium'}</span>
                         </button>
                       )}
                       
@@ -744,13 +798,17 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                           onClick={() => handleDownloadClick(src)}
                           disabled={downloadingQuality === src.quality}
                           className={`p-2.5 rounded-xl transition flex items-center justify-center min-w-[40px] ${
-                            darkMode 
-                              ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white' 
-                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900'
+                            !hasDownloadAccess
+                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
+                              : darkMode 
+                                ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white' 
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900'
                           }`}
-                          title="Download Movie"
+                          title={hasDownloadAccess ? "Download Movie" : "🔒 Direct Downloads require Premium"}
                         >
-                          {downloadingQuality === src.quality ? (
+                          {!hasDownloadAccess ? (
+                            <Lock className="w-4 h-4 text-amber-400" />
+                          ) : downloadingQuality === src.quality ? (
                             <div className="flex items-center gap-1 text-[10px] font-mono font-extrabold text-emerald-400">
                               {downloadProgress !== null ? `${downloadProgress}%` : <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />}
                             </div>
