@@ -27,26 +27,53 @@ export function getAdminUserIds() {
 /**
  * Check if a given Telegram User ID is an Admin
  */
-export function isAdminUser(telegramUserId) {
-  // If no user ID provided or in dev mode (id 0 or null), allow admin in dev
-  if (telegramUserId === undefined || telegramUserId === null || telegramUserId === 0 || telegramUserId === '0') {
-    return true;
+export function isAdminUser(telegramUserId, explicitRole) {
+  // 1. Explicit DB/state role is the SINGLE SOURCE OF TRUTH
+  if (explicitRole) {
+    const norm = String(explicitRole).toLowerCase();
+    if (norm === 'vip' || norm === 'premium' || norm === 'normal' || norm === 'user') {
+      return false;
+    }
+    if (norm === 'admin') return true;
   }
+
+  // 2. Check stored admin IDs list
   const idNum = Number(telegramUserId);
   const adminList = getAdminUserIds();
-  return adminList.some(id => Number(id) === idNum);
+  const isInAdminList = adminList.some(id => Number(id) === idNum);
+
+  if (isInAdminList) return true;
+
+  // 3. Dev ID 0 check ONLY if not explicitly demoted
+  if (telegramUserId === undefined || telegramUserId === null || telegramUserId === 0 || telegramUserId === '0') {
+    try {
+      const isDemoted = localStorage.getItem('smd_dev_0_demoted') === 'true';
+      return !isDemoted;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
  * Add a Telegram User ID to Admin List and sync to Supabase
  */
 export function addAdminUser(telegramUserId) {
-  if (!telegramUserId && telegramUserId !== 0) return false;
+  if (telegramUserId === undefined || telegramUserId === null) return false;
   const idNum = Number(telegramUserId);
+  
+  if (idNum === 0 || String(telegramUserId) === '0') {
+    try { localStorage.removeItem('smd_dev_0_demoted'); } catch (e) {}
+  }
+
   const currentAdmins = getAdminUserIds();
   if (!currentAdmins.includes(idNum)) {
     const updated = [...currentAdmins, idNum];
-    localStorage.setItem('smd_prime_admin_ids', JSON.stringify(updated));
+    try {
+      localStorage.setItem('smd_prime_admin_ids', JSON.stringify(updated));
+    } catch (e) {}
   }
   // Sync to Supabase PostgreSQL database table 'users'
   updateUserAdminStatus(idNum, true);
@@ -58,9 +85,16 @@ export function addAdminUser(telegramUserId) {
  */
 export function removeAdminUser(telegramUserId) {
   const idNum = Number(telegramUserId);
+
+  if (idNum === 0 || String(telegramUserId) === '0') {
+    try { localStorage.setItem('smd_dev_0_demoted', 'true'); } catch (e) {}
+  }
+
   const currentAdmins = getAdminUserIds();
   const updated = currentAdmins.filter(id => Number(id) !== idNum);
-  localStorage.setItem('smd_prime_admin_ids', JSON.stringify(updated));
+  try {
+    localStorage.setItem('smd_prime_admin_ids', JSON.stringify(updated));
+  } catch (e) {}
   // Sync to Supabase PostgreSQL database table 'users'
   updateUserAdminStatus(idNum, false);
   return true;

@@ -259,9 +259,13 @@ export default function App() {
     syncAdsForCurrentUser();
 
     const handleSync = (e) => {
-      const updatedRole = e?.detail?.role;
+      const updatedRole = e?.detail?.role || e?.detail?.newRole;
       if (updatedRole) {
-        setCurrentUserRole(updatedRole);
+        const normRole = String(updatedRole).toLowerCase();
+        setCurrentUserRole(normRole);
+        if (normRole !== 'admin') {
+          setIsAdminOpen(false); // 0ms Instant Security Guard Auto-Close!
+        }
       }
       syncAdsForCurrentUser();
     };
@@ -269,7 +273,11 @@ export default function App() {
     const unsubscribeRealtime = subscribeToRealtimeRoleAndPolicy(
       tgUser?.id,
       (newRole) => {
-        if (newRole) setCurrentUserRole(newRole);
+        if (newRole) {
+          const norm = String(newRole).toLowerCase();
+          setCurrentUserRole(norm);
+          if (norm !== 'admin') setIsAdminOpen(false);
+        }
         syncAdsForCurrentUser();
       },
       () => syncAdsForCurrentUser()
@@ -278,6 +286,7 @@ export default function App() {
     window.addEventListener('smd_role_policies_changed', handleSync);
     document.addEventListener('smd_role_policies_changed', handleSync);
     window.addEventListener('smd_user_role_updated', handleSync);
+    document.addEventListener('smd_user_role_updated', handleSync);
     window.addEventListener('smd_user_role_changed', handleSync);
     document.addEventListener('smd_user_role_updated', handleSync);
     document.addEventListener('smd_user_role_changed', handleSync);

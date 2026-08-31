@@ -1702,6 +1702,15 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                         setAdminIds(prev => prev.filter(id => String(id) !== String(tgId)));
                       }
 
+                      // Broadcast live event across system for 0ms Instant Security Guard Response
+                      try {
+                        const evt = new CustomEvent('smd_user_role_updated', {
+                          detail: { telegramUserId: tgId, newRole: targetRole }
+                        });
+                        window.dispatchEvent(evt);
+                        document.dispatchEvent(evt);
+                      } catch (e) {}
+
                       triggerToast(`Role updated to ${targetRole.toUpperCase()} in Supabase DB`);
 
                       // 2. Background Persistence to Supabase DB
