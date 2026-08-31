@@ -132,14 +132,16 @@ export async function fetchMoviesFromSupabase() {
       const title = sanitizeTitle(item.title);
 
       // Find matching metadata from repository key or title
-      let meta = REAL_MOVIE_METADATA[uid] || {};
-      if (!meta.title) {
+      // Safe metadata fallback object
+      let meta = (uid && REAL_MOVIE_METADATA[uid]) ? REAL_MOVIE_METADATA[uid] : {};
+      if (!meta || !meta.title) {
         const tLower = (title || '').toLowerCase();
-        if (tLower.includes('master')) meta = REAL_MOVIE_METADATA.master_2021;
-        else if (tLower.includes('jurassic')) meta = REAL_MOVIE_METADATA.return_to_the_jurassic_2025;
-        else if (tLower.includes('lik') || tLower.includes('insurance')) meta = REAL_MOVIE_METADATA.lik_love_insurance_kompany_2026;
-        else if (tLower.includes('lbw') || tLower.includes('wicket')) meta = REAL_MOVIE_METADATA.lbw___love_beyond_wicket_2025;
-        else if (tLower.includes('batch')) meta = REAL_MOVIE_METADATA.batchmates_2026;
+        if (tLower.includes('master')) meta = REAL_MOVIE_METADATA.master_2021 || {};
+        else if (tLower.includes('jurassic')) meta = REAL_MOVIE_METADATA.return_to_the_jurassic_2025 || {};
+        else if (tLower.includes('lik') || tLower.includes('insurance')) meta = REAL_MOVIE_METADATA.lik_love_insurance_kompany_2026 || {};
+        else if (tLower.includes('lbw') || tLower.includes('wicket')) meta = REAL_MOVIE_METADATA.lbw___love_beyond_wicket_2025 || {};
+        else if (tLower.includes('batch')) meta = REAL_MOVIE_METADATA.batchmates_2026 || {};
+        else meta = {};
       }
 
       // Prioritize dynamic movie_metadata formatted_duration if present
@@ -167,24 +169,24 @@ export async function fetchMoviesFromSupabase() {
 
       const genresList = (Array.isArray(item.genres) && item.genres.length > 0) 
         ? item.genres 
-        : (meta.genres || ['Action']);
+        : (meta?.genres || ['Action']);
 
       const ratingValue = item.rating !== null && item.rating !== undefined 
         ? String(item.rating) 
-        : (meta.rating ? String(meta.rating) : '7.5');
+        : (meta?.rating ? String(meta.rating) : '7.5');
 
       return {
         id: uid,
         uid: uid,
         title: title,
-        original_title: sanitizeTitle(item.original_title || meta.original_title || title),
-        description: item.overview || meta.overview || 'High quality cinema stream loaded live from SMD Prime Cloud Cinema Library.',
+        original_title: sanitizeTitle(item.original_title || meta?.original_title || title),
+        description: item.overview || meta?.overview || 'High quality cinema stream loaded live from SMD Prime Cloud Cinema Library.',
         thumbnail_url: poster_url,
         banner_url: backdrop_url,
         genre: genresList[0] || 'Action',
         all_genres: genresList,
-        year: item.release_year ? String(item.release_year) : (meta.release_year ? String(meta.release_year) : '2026'),
-        duration: dynamicDuration || item.duration || meta.duration || '2h 15m',
+        year: item.release_year ? String(item.release_year) : (meta?.release_year ? String(meta.release_year) : '2026'),
+        duration: dynamicDuration || item.duration || meta?.duration || '2h 15m',
         duration_seconds: dynamicMeta?.duration_seconds || null,
         rating: ratingValue,
         trending: parseFloat(ratingValue) >= 8.0 || Boolean(item.release_year && item.release_year >= 2026),

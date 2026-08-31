@@ -156,6 +156,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
           quality,
           drive_file_id,
           clone_file_ids,
+          target_clones,
           created_at,
           movies (
             title,
@@ -169,7 +170,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
       }
 
       if (data) {
-        // Hydrate target_clones from localStorage or default to 3
+        // Hydrate target_clones prioritizing Supabase DB value
         const hydrated = data.map(src => {
           let savedTarget = 3;
           try {
@@ -178,7 +179,9 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
           } catch (e) {}
           return {
             ...src,
-            target_clones: src.target_clones || savedTarget || 3
+            target_clones: (src.target_clones !== null && src.target_clones !== undefined && Number(src.target_clones) > 0)
+              ? Number(src.target_clones)
+              : (savedTarget || 3)
           };
         });
         setMovieSourcesList(hydrated);
@@ -189,6 +192,25 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
       setIsSourcesLoading(false);
     }
   }, []);
+
+  // ⚡ 0-LATENCY REALTIME SYNC: Subscribe to Postgres changes on 'movie_sources' table
+  useEffect(() => {
+    fetchMovieSources();
+
+    const channelId = `admin_realtime_sources_${Math.random().toString(36).substring(2, 9)}`;
+    const channel = supabase.channel(channelId);
+
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'movie_sources' }, () => {
+        console.log('⚡ [Realtime Admin Sync] movie_sources table changed in Supabase DB! Reloading live sources...');
+        fetchMovieSources();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchMovieSources]);
 
   // Group Movie Sources by Movie Title + Release Year + Language
   const groupedMoviesList = useMemo(() => {
