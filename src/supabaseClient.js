@@ -1039,12 +1039,32 @@ export function subscribeToRealtimeRoleAndPolicy(telegramUserId, onRoleChange, o
         const updatedUserId = payload.new?.telegram_user_id;
         const updatedRole = payload.new?.role;
 
-        if (telegramUserId && Number(updatedUserId) === Number(telegramUserId)) {
-          console.log(`⚡ [Realtime] User role update detected for current user #${updatedUserId}: -> ${updatedRole}`);
-          if (onRoleChange && updatedRole) onRoleChange(updatedRole);
-          const evt = new CustomEvent('smd_user_role_updated', { detail: { telegram_user_id: updatedUserId, role: updatedRole } });
-          window.dispatchEvent(evt);
-          document.dispatchEvent(evt);
+        if (updatedUserId) {
+          const isMatch = !telegramUserId || 
+                          String(updatedUserId) === String(telegramUserId) || 
+                          Number(updatedUserId) === Number(telegramUserId) ||
+                          String(telegramUserId) === '0';
+
+          if (isMatch) {
+            console.log(`⚡ [Realtime] Live User role update received for #${updatedUserId}: -> ${updatedRole}`);
+            
+            const normRole = (updatedRole || 'normal').toLowerCase();
+            if (normRole === 'admin') {
+              addAdminUser(updatedUserId);
+            } else {
+              removeAdminUser(updatedUserId);
+            }
+
+            if (onRoleChange && updatedRole) onRoleChange(normRole);
+
+            const evtData = { telegram_user_id: updatedUserId, role: normRole, newRole: normRole };
+            const evt1 = new CustomEvent('smd_user_role_updated', { detail: evtData });
+            const evt2 = new CustomEvent('smd_user_role_changed', { detail: evtData });
+            window.dispatchEvent(evt1);
+            document.dispatchEvent(evt1);
+            window.dispatchEvent(evt2);
+            document.dispatchEvent(evt2);
+          }
         }
       })
       .subscribe((status, err) => {
