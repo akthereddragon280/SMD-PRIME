@@ -1003,35 +1003,48 @@ export async function updateUserRoleInSupabase(telegramId, newRole) {
  * Subscribe to Supabase Realtime changes on 'users' & 'role_policies' tables for multi-device/multi-client sync
  */
 export function subscribeToRealtimeRoleAndPolicy(telegramUserId, onRoleChange, onPolicyChange) {
-  const channel = supabase.channel('realtime_role_policy_sync');
+  try {
+    const channelId = `realtime_sync_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
+    const channel = supabase.channel(channelId);
 
-  channel
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'role_policies' }, async () => {
-      console.log('⚡ [Realtime] Policy change detected from Supabase DB! Reloading policies...');
-      const freshPolicies = await getRolePolicies();
-      if (onPolicyChange) onPolicyChange(freshPolicies);
-      const evt = new CustomEvent('smd_role_policies_changed', { detail: freshPolicies });
-      window.dispatchEvent(evt);
-      document.dispatchEvent(evt);
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async (payload) => {
-      const updatedUserId = payload.new?.telegram_user_id;
-      const updatedRole = payload.new?.role;
-
-      if (telegramUserId && Number(updatedUserId) === Number(telegramUserId)) {
-        console.log(`⚡ [Realtime] User role update detected for current user #${updatedUserId}: -> ${updatedRole}`);
-        if (onRoleChange && updatedRole) onRoleChange(updatedRole);
-        const evt = new CustomEvent('smd_user_role_updated', { detail: { telegram_user_id: updatedUserId, role: updatedRole } });
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'role_policies' }, async () => {
+        console.log('⚡ [Realtime] Policy change detected from Supabase DB! Reloading policies...');
+        const freshPolicies = await getRolePolicies();
+        if (onPolicyChange) onPolicyChange(freshPolicies);
+        const evt = new CustomEvent('smd_role_policies_changed', { detail: freshPolicies });
         window.dispatchEvent(evt);
         document.dispatchEvent(evt);
-      }
-    })
-    .subscribe();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, async (payload) => {
+        const updatedUserId = payload.new?.telegram_user_id;
+        const updatedRole = payload.new?.role;
 
-  return () => {
-    supabase.removeChannel(channel);
-  };
+        if (telegramUserId && Number(updatedUserId) === Number(telegramUserId)) {
+          console.log(`⚡ [Realtime] User role update detected for current user #${updatedUserId}: -> ${updatedRole}`);
+          if (onRoleChange && updatedRole) onRoleChange(updatedRole);
+          const evt = new CustomEvent('smd_user_role_updated', { detail: { telegram_user_id: updatedUserId, role: updatedRole } });
+          window.dispatchEvent(evt);
+          document.dispatchEvent(evt);
+        }
+      })
+      .subscribe((status, err) => {
+        if (err) {
+          console.warn('Supabase Realtime subscription status:', status, err);
+        }
+      });
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch (e) {}
+    };
+  } catch (err) {
+    console.warn('Failed to initialize Realtime subscription:', err);
+    return () => {};
+  }
 }
+
 
 
 
