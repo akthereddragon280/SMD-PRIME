@@ -95,7 +95,7 @@ export function removeAdminUser(telegramUserId) {
   try {
     localStorage.setItem('smd_prime_admin_ids', JSON.stringify(updated));
   } catch (e) {}
-  // Sync to Supabase PostgreSQL database table 'users'
+  // Sync to Supabase PostgreSQL database table 'users'.....
   updateUserAdminStatus(idNum, false);
   return true;
 }
