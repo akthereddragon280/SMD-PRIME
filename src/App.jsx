@@ -224,15 +224,25 @@ export default function App() {
     const tgUser = getTelegramUserInfo();
 
     const resolveUserRole = async () => {
-      // 1. Check canonical isAdminUser helper (Dev ID 0 or local storage admin list)
-      if (isAdminUser(tgUser?.id)) {
-        return 'admin';
-      }
-
-      // 2. Fetch role from Supabase DB
+      // 1. Primary: Fetch role directly from Supabase DB (Single Source of Truth)
       if (tgUser?.id) {
         const dbRole = await getUserRoleFromSupabase(tgUser.id);
-        if (dbRole) return dbRole.toLowerCase();
+        if (dbRole) {
+          const norm = dbRole.toLowerCase();
+          if (norm === 'admin') {
+            addAdminUser(tgUser.id);
+            return 'admin';
+          } else {
+            // Auto-purge stale LocalStorage cache if DB says non-admin!
+            removeAdminUser(tgUser.id);
+            return norm;
+          }
+        }
+      }
+
+      // 2. Fallback: Check canonical isAdminUser helper (Dev ID 0 localhost fallback)
+      if (isAdminUser(tgUser?.id)) {
+        return 'admin';
       }
 
       // 3. Fallback to normal
