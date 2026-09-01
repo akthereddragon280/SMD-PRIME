@@ -684,6 +684,14 @@ export const DEFAULT_ROLE_POLICIES = {
     parallel_streams: 1,
     enable_ads: true
   },
+  vip: {
+    max_resolution: '4K',
+    download_access: true,
+    external_player: true,
+    sa_mesh_priority: 'Turbo',
+    parallel_streams: 3,
+    enable_ads: false
+  },
   premium: {
     max_resolution: '4K',
     download_access: true,
@@ -697,6 +705,14 @@ export const DEFAULT_ROLE_POLICIES = {
     download_access: true,
     external_player: true,
     sa_mesh_priority: 'VIP',
+    parallel_streams: 999,
+    enable_ads: false
+  },
+  super_admin: {
+    max_resolution: '4K',
+    download_access: true,
+    external_player: true,
+    sa_mesh_priority: 'Ultra',
     parallel_streams: 999,
     enable_ads: false
   }
@@ -935,15 +951,13 @@ export async function updateUserRoleInSupabase(telegramId, newRole) {
     
     // Strict Whitelist Sanitization Engine
     let role = (newRole || 'normal').toLowerCase().trim();
-    const VALID_ROLES = ['normal', 'user', 'vip', 'premium', 'admin', 'super_admin', 'superadmin', 'owner'];
+    const VALID_ROLES = ['normal', 'vip', 'premium', 'admin'];
     if (!VALID_ROLES.includes(role)) {
       console.warn(`[RBAC Guard] Invalid role '${newRole}' provided. Falling back to 'normal'.`);
       role = 'normal';
     }
-    // Standardize aliases
+    // Standardize 'premium' to 'vip'
     if (role === 'premium') role = 'vip';
-    if (role === 'superadmin' || role === 'owner') role = 'super_admin';
-    if (role === 'user') role = 'normal';
 
     const idStr = String(telegramId).trim();
     const idNum = Number(idStr);
