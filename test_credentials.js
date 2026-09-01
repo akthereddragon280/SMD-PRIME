@@ -33,37 +33,10 @@ ${C.dim}System Time: ${new Date().toLocaleString()}${C.reset}
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 const WORKER_PROXY = process.env.VITE_WORKER_PROXY_URL || 'https://tgstream.smd-prime.workers.dev/?id=';
-const TMDB_KEY = process.env.TMDB_API_KEY || 'dbfeec55072d7f659ba0c76cd1cbda47';
-const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '19FJzU-ZrwOOVOmxginGpBMo3YQC1swXM';
-const SA_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 'tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com';
-const PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || `-----BEGIN PRIVATE KEY-----
-MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDH/ZrgLW4U9Bhi
-HCKkwxrjJ/YhruF9kQONhMbZnvpeHFQb3+Tyc/sv1nrl0XkJ/NhittZ7zTGqQHhM
-bmxs76TWGCi/cK9e5bzO1jj+p/GxY2GnnOBQr3VMVGldpoS/9RrE00dN+RRLbrR6
-wNzWk+zjMNINE7bhKDDBjCzZMzOeJYbzjArls4GcgPYBNOmUDx31s1PSagpBAwzc
-zKJNSmJlDraWrbEvYWRHpgZbVXmfy0Dc+6cOs61Y6NpScHDVPe7lNpnr3HXzW/KA
-m8f04Gd5V+VLBV9aYLPx013S/cvb7/qcKMnwU3VBPTAlsK8TrRdx1JrVXFA1E4Bd
-KQq8Yg5PAgMBAAECggEAD+n3TAVxcAtocU4p15CK8C564H1JBjPm43kAVcrXw2tf
-qgQr9LsT7t+TUfxUNF5BXcGM2bcfT5vntrVGvXhoVnz/qRQvcE65sn/Lc0Ar9GCj
-IbJTCzibDeLdq40XnSrE4YqqbuL2IXaCuA3mxNBqlj2JSW8bK1mGX7Bm1TXE0r2n
-tNDu8bOapl4vt2g+Y+ad8ArC5oDOO+NaVGoDtHGvcBQAeEuKebmLLeIj0Aa8luFr
-YPTyZWvcOwdqeM4dYmiLfYSvCXFtys0NXeJ86KLw71RuD+ox2fSiR6EvvRPmk2SL
-PRx923xjRnMP9tclJuKFht1KnjDhGgwVjStK0dSIOQKBgQDoD/oD/WhPR9RyEdfU
-9gN+QZH+TILiXcbTZ+D2fGFVDlg5F+9nhpmBLeB20/frC1JyofWmxy11578YegKW
-wbdYD55jJ/fwBsPidPhBT3R/2HlzMj1VCIVwDtqKkorn9Rsr/byD+XdjLMIrW3/p
-mwnFHsW5G8lmZYPEpgH+f4+LpQKBgQDcnrdMJBtEsQTGB2tTiuZ4pTjNMICShjtH
-8xAW5/aOs0YAAjQc7RAaG9FbY06ahwViXPonPPUgRwNLud3pwlXyYe6VZyPvTq6J
-i1OrA+Bdhvskw7KAa8BzcOo6RuWtfxmZX7/TGMSqtMoILoX9lCTZAZQ7uxI8ewVS
-Tv40x3tf4wKBgQCei6PNrAji+Xk8wdIKrlWuoc/DxLQ7QcSAVN1OqaW5/cXqo96t
-hTlFF3ne1WzxCdg3d02ktzno7v8REvLH2uuPX4RfzEPJmmWkRzQBMu6uFdDMEkvy
-15KK/6rxt7LtTPlWcdGk/QBDIqY6BxZ6HLFtGlwN3t0Xd02yQZTlMnN4/QKBgQCx
-2cEqQHE7DvkqKxD6aB8jYw5HW7JKbKuddPSjgpvgreTgXOZl6zXv1j0Pzx6us+pD
-QXDn8NwrCRQ/F7ctmtxuaURMbLkrUeKiPw9T7ewReZ88JAbiP/sFFSG9mSnOk4ev
-fODG7FCezN+ReO/LXIHX7s3w2P36g7HmiIelRKrQwQKBgQCxydU5F191YOg/G3mF
-Kg0ETT8SygNgvM/mLLPX6tr4pR85E5ju35uy56xj0MHfnW+Qg2FcwVhPwQNUcCqu
-d6ddgLdaVx1V7kLqQW0soiGdf3J1bM4JH/rFW1gPcmhBUWLGGQDyyk3eOsK+3CzT
-fOPlZNKYGtgFbD+AgdhoQx5MNA==
------END PRIVATE KEY-----`).replace(/\\n/g, '\n');
+const TMDB_KEY = process.env.TMDB_API_KEY;
+const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
+const SA_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+const PRIVATE_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ? process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace(/\\n/g, '\n') : '';
 
 const testReport = [];
 
@@ -75,6 +48,9 @@ async function runCredentialDiagnostics() {
   console.log(`${C.yellow}${C.bright}► TEST 1: Supabase Database Gateway & Schema${C.reset}`);
   const t1 = Date.now();
   try {
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+      throw new Error('SUPABASE_URL or SUPABASE_KEY missing in environment variables');
+    }
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
     const { data: movies, error: err1 } = await supabase.from('movies').select('*');
     const { data: sources, error: err2 } = await supabase.from('movie_sources').select('*');
@@ -128,6 +104,9 @@ async function runCredentialDiagnostics() {
   console.log(`${C.yellow}${C.bright}► TEST 3: TMDB (The Movie Database) Metadata API Key${C.reset}`);
   const t3 = Date.now();
   try {
+    if (!TMDB_KEY) {
+      throw new Error('TMDB_API_KEY missing in environment variables');
+    }
     const res = await fetch(`https://api.themoviedb.org/3/configuration?api_key=${TMDB_KEY}`);
     const latency = Date.now() - t3;
     const data = await res.json();
@@ -145,9 +124,8 @@ async function runCredentialDiagnostics() {
       testReport.push({ service: 'TMDB API Key', status: 'VALID & ONLINE', latency: `${latency}ms`, note: 'Gateway active' });
     }
   } catch (e) {
-    console.log(`  ${fail} TMDB API connection error (Local ISP Throttled): ${e.message}`);
-    console.log(`  ${info} Note: Cloudflare Worker bypasses local ISP throttling globally on edge servers!`);
-    testReport.push({ service: 'TMDB API Key', status: 'THROTTLED (LOCAL)', latency: 'Timeout', note: 'Bypassed by Worker' });
+    console.log(`  ${fail} TMDB API connection error: ${e.message}`);
+    testReport.push({ service: 'TMDB API Key', status: 'ERROR', latency: 'N/A', note: e.message });
   }
 
   console.log('');
@@ -158,6 +136,9 @@ async function runCredentialDiagnostics() {
   console.log(`${C.yellow}${C.bright}► TEST 4: Google Drive Service Account RS256 OAuth & 7TB Folder${C.reset}`);
   const t4 = Date.now();
   try {
+    if (!SA_EMAIL || !PRIVATE_KEY || !FOLDER_ID) {
+      throw new Error('Google SA Email, Private Key, or Folder ID missing in environment variables');
+    }
     const header = { alg: 'RS256', typ: 'JWT' };
     const now = Math.floor(Date.now() / 1000);
     const payload = {
@@ -196,7 +177,6 @@ async function runCredentialDiagnostics() {
       console.log(`  ${pass} OAuth 2.0 Access Token Generated (${Date.now() - t4}ms)`);
       console.log(`  ${info} Service Account: ${C.cyan}${SA_EMAIL}${C.reset}`);
 
-      // Query Google Drive Folder Files
       const driveRes = await fetch(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+trashed=false&fields=files(id,name,size,mimeType)&pageSize=100`, {
         headers: { Authorization: `Bearer ${tokenData.access_token}` }
       });
@@ -225,9 +205,6 @@ async function runCredentialDiagnostics() {
     testReport.push({ service: 'Google Drive 7TB Folder', status: 'ERROR', latency: 'N/A', note: e.message });
   }
 
-  // ====================================================================
-  // DIAGNOSTIC SUMMARY TABLE (100% IMPACT)
-  // ====================================================================
   console.log(`
 ${C.red}${C.bright}======================================================================
   📊 SYSTEM CREDENTIAL DIAGNOSTIC SUMMARY REPORT
@@ -241,8 +218,7 @@ ${C.red}${C.bright}=============================================================
   const healthPercentage = Math.round((passedCount / totalCount) * 100);
 
   console.log(`
-${C.bright}System Health Score:${C.reset} ${healthPercentage === 100 ? C.green : C.yellow}${C.bright}${healthPercentage}% FULLY OPERATIONAL${C.reset}
-${C.dim}All core environment credentials verified for production deployment.${C.reset}
+${C.bright}System Health Score:${C.reset} ${healthPercentage === 100 ? C.green : C.yellow}${C.bright}${healthPercentage}% OPERATIONAL${C.reset}
 `);
 }
 

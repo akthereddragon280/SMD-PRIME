@@ -5,5 +5,4 @@ compatibility_date = "2026-08-20"
 [vars]
 WEB_APP_URL = "https://smd-prime.vercel.app"
 SUPABASE_URL = "https://iwulcblngplsjtsipods.supabase.co"
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3dWxjYmxuZ3Bsc2p0c2lwb2RzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzA0MTA2MywiZXhwIjoyMTAyNjE3MDYzfQ.X61a2cj17Zs8Q-0-Pe1ku1PMi_uiybIlYFLv61d8tDU"
 ADMIN_IDS = "6846236707"
