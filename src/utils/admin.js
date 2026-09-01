@@ -25,7 +25,7 @@ export function getAdminUserIds() {
 }
 
 /**
- * Check if a given Telegram User ID is an Admin
+ * Check if a given Telegram User ID is an Admin or Super Admin
  */
 export function isAdminUser(telegramUserId, explicitRole) {
   // 1. Explicit DB/state role is the SINGLE SOURCE OF TRUTH
@@ -34,7 +34,9 @@ export function isAdminUser(telegramUserId, explicitRole) {
     if (norm === 'vip' || norm === 'premium' || norm === 'normal' || norm === 'user') {
       return false;
     }
-    if (norm === 'admin') return true;
+    if (norm === 'admin' || norm === 'super_admin' || norm === 'superadmin' || norm === 'owner') {
+      return true;
+    }
   }
 
   // 2. Check stored admin IDs list
@@ -45,6 +47,35 @@ export function isAdminUser(telegramUserId, explicitRole) {
   if (isInAdminList) return true;
 
   // 3. Dev ID 0 check ONLY if not explicitly demoted
+  if (telegramUserId === undefined || telegramUserId === null || telegramUserId === 0 || telegramUserId === '0') {
+    try {
+      const isDemoted = localStorage.getItem('smd_dev_0_demoted') === 'true';
+      return !isDemoted;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Check if a given Telegram User ID is a Super Admin (👑 Owner Privileges)
+ */
+export function isSuperAdminUser(telegramUserId, explicitRole) {
+  // 1. Explicit DB role check
+  if (explicitRole) {
+    const norm = String(explicitRole).toLowerCase();
+    if (norm === 'super_admin' || norm === 'superadmin' || norm === 'owner') {
+      return true;
+    }
+  }
+
+  // 2. Check root ENV admin IDs
+  const idNum = Number(telegramUserId);
+  if (ENV_ADMIN_IDS.includes(idNum)) return true;
+
+  // 3. Dev ID 0 is Super Admin by default unless demoted
   if (telegramUserId === undefined || telegramUserId === null || telegramUserId === 0 || telegramUserId === '0') {
     try {
       const isDemoted = localStorage.getItem('smd_dev_0_demoted') === 'true';

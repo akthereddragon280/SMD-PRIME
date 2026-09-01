@@ -10,7 +10,7 @@ import {
   getRolePolicies, setRolePolicies, DEFAULT_ROLE_POLICIES, updateUserRoleInSupabase,
   updateMovieSourceCloneTarget
 } from '../supabaseClient';
-import { getAdminUserIds, addAdminUser, removeAdminUser } from '../utils/admin';
+import { getAdminUserIds, addAdminUser, removeAdminUser, isSuperAdminUser } from '../utils/admin';
 import { openExternalLink, triggerHaptic } from '../utils/telegram';
 import { registerNodesFromDiagnostics } from '../utils/loadBalancer';
 
