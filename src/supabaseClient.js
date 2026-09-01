@@ -345,7 +345,9 @@ export async function upsertTelegramUser(tgUser) {
   if (!tgUser || !tgUser.id) return null;
   const userIdInt = normalizeTelegramUserIdInt(tgUser.id);
   
-  const payload = {
+  // ⚠️ CRITICAL: NEVER include 'role' in payload – it would overwrite DB role on every login!
+  //   Only update profile metadata (name, username, avatar).
+  const profilePayload = {
     telegram_user_id: userIdInt,
     username: tgUser.username || '',
     first_name: tgUser.first_name || '',
@@ -354,39 +356,35 @@ export async function upsertTelegramUser(tgUser) {
   };
 
   try {
-    // 0. Check if user is marked as admin in Supabase users table
+    // 1. Check existing user to preserve their role
     const { data: userRow } = await supabase
       .from('users')
-      .select('role')
+      .select('id, role')
       .eq('telegram_user_id', userIdInt)
       .limit(1)
       .maybeSingle();
 
-    if (userRow && userRow.role === 'admin') {
-      import('./utils/admin').then(({ addAdminUser }) => addAdminUser(userIdInt)).catch(() => {});
-    }
+    if (userRow && userRow.id) {
+      // ✅ User exists: UPDATE only profile metadata, DO NOT touch 'role'
+      const { error } = await supabase
+        .from('users')
+        .update(profilePayload)
+        .eq('id', userRow.id);
 
-    // 1. Try standard upsert with onConflict
-    const { data, error } = await supabase
-      .from('users')
-      .upsert(payload, { onConflict: 'telegram_user_id' });
+      // Grant admin localStorage if DB says admin/super_admin
+      const roleNorm = (userRow.role || 'normal').toLowerCase();
+      if (roleNorm === 'admin' || roleNorm === 'super_admin') {
+        import('./utils/admin').then(({ addAdminUser }) => addAdminUser(userIdInt)).catch(() => {});
+      }
 
-    if (!error) return data;
-
-    // 2. Manual Fallback: Check then Update/Insert
-    const { data: existing } = await supabase
-      .from('users')
-      .select('id')
-      .eq('telegram_user_id', userIdInt)
-      .limit(1)
-      .maybeSingle();
-
-    if (existing && existing.id) {
-      await supabase.from('users').update(payload).eq('id', existing.id);
+      return !error;
     } else {
-      await supabase.from('users').insert(payload);
+      // New user: Insert with default role = 'normal'
+      const { data, error } = await supabase
+        .from('users')
+        .insert({ ...profilePayload, role: 'normal' });
+      return !error;
     }
-    return true;
   } catch (err) {
     return null;
   }

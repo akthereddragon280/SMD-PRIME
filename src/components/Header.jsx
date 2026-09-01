@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Search, Film, Moon, Sun, CheckCircle2, ShieldCheck, X, ShieldAlert } from 'lucide-react';
+import { Search, Film, Moon, Sun, ShieldCheck, X, ShieldAlert } from 'lucide-react';
 import { triggerHaptic, getTelegramUserInfo } from '../utils/telegram';
-import { isAdminUser, isSuperAdminUser } from '../utils/admin';
 
 export default function Header({ 
   onOpenSearch, 
@@ -14,29 +13,33 @@ export default function Header({
 }) {
   const [showProfileCard, setShowProfileCard] = useState(false);
   const telegramUser = getTelegramUserInfo();
-  const isSuperAdmin  = (currentUserRole === 'super_admin') || isSuperAdminUser(telegramUser?.id, currentUserRole);
-  const isUserAdmin   = isSuperAdmin || (currentUserRole === 'admin') || isAdminUser(telegramUser?.id, currentUserRole);
 
-  // Role-based avatar ring colors (4 tiers)
+  // ─── 100% Prop-Driven Role Tier (Single Source of Truth = DB via App.jsx) ───
+  const role       = String(currentUserRole || 'normal').toLowerCase().trim();
+  const isSuperAdmin = role === 'super_admin';
+  const isAdmin      = role === 'admin';
+  const isVip        = role === 'vip' || role === 'premium';
+  const isUserAdmin  = isSuperAdmin || isAdmin;
+
+  // ─── 4-Tier Avatar Ring Color ───
   const getRoleRingClass = () => {
-    if (isSuperAdmin)                                         return 'border-yellow-400 ring-2 ring-yellow-400/50 shadow-[0_0_14px_rgba(250,204,21,0.6)]'; // 👑 Super Admin – Gold Crown
-    if (currentUserRole === 'admin')                          return 'border-emerald-500 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.5)]';  // 🛡️ Admin – Green
-    if (currentUserRole === 'vip' || currentUserRole === 'premium') return 'border-violet-500 ring-2 ring-violet-400/40 shadow-[0_0_12px_rgba(139,92,246,0.5)]';  // ⭐ VIP – Violet
-    return 'border-red-500 ring-2 ring-red-500/30';                                                                                                              // 👤 Normal – Red
+    if (isSuperAdmin) return 'border-yellow-400 ring-2 ring-yellow-400/50 shadow-[0_0_14px_rgba(250,204,21,0.65)]'; // 👑 Gold
+    if (isAdmin)      return 'border-emerald-400 ring-2 ring-emerald-400/50 shadow-[0_0_12px_rgba(16,185,129,0.5)]'; // 🛡️ Green
+    if (isVip)        return 'border-violet-400 ring-2 ring-violet-400/50 shadow-[0_0_12px_rgba(139,92,246,0.55)]'; // ⭐ Violet
+    return 'border-zinc-500/60 ring-1 ring-zinc-500/20'; // 👤 Grey
   };
   const getRoleAvatarBg = () => {
-    if (isSuperAdmin)                                         return 'bg-gradient-to-tr from-yellow-600 via-amber-500 to-yellow-300 border-yellow-400';
-    if (currentUserRole === 'admin')                          return 'bg-gradient-to-tr from-emerald-700 via-teal-600 to-emerald-400 border-emerald-400';
-    if (currentUserRole === 'vip' || currentUserRole === 'premium') return 'bg-gradient-to-tr from-violet-700 via-purple-500 to-violet-400 border-violet-400';
-    return 'bg-gradient-to-tr from-red-600 via-rose-600 to-red-400 border-red-400';
+    if (isSuperAdmin) return 'bg-gradient-to-tr from-yellow-600 via-amber-500 to-yellow-300';
+    if (isAdmin)      return 'bg-gradient-to-tr from-emerald-700 via-teal-600 to-emerald-400';
+    if (isVip)        return 'bg-gradient-to-tr from-violet-700 via-purple-500 to-violet-400';
+    return 'bg-gradient-to-tr from-zinc-700 via-zinc-600 to-zinc-500';
   };
-  const getRoleBadgeLabel = () => {
-    if (isSuperAdmin)                   return { emoji: '👑', label: 'Super Administrator', color: 'text-yellow-500' };
-    if (currentUserRole === 'admin')    return { emoji: '🛡️', label: 'Platform Administrator', color: 'text-emerald-500' };
-    if (currentUserRole === 'vip' || currentUserRole === 'premium') return { emoji: '⭐', label: 'VIP Premium Streamer', color: 'text-violet-400' };
-    return { emoji: '👤', label: 'Standard Member', color: 'text-zinc-400' };
-  };
-  const roleBadge = getRoleBadgeLabel();
+  const roleBadge = (() => {
+    if (isSuperAdmin) return { emoji: '👑', label: 'Super Administrator',   color: 'text-yellow-400 font-bold' };
+    if (isAdmin)      return { emoji: '🛡️', label: 'Platform Administrator', color: 'text-emerald-400 font-bold' };
+    if (isVip)        return { emoji: '⭐', label: 'VIP Premium Streamer',   color: 'text-violet-400 font-bold' };
+    return             { emoji: '👤', label: 'Standard Member',             color: 'text-zinc-400' };
+  })();
 
   const handleSearchClick = () => {
     triggerHaptic('light');
