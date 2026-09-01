@@ -11,7 +11,7 @@ import PlayerGateway from './components/PlayerGateway';
 import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
 import { useNavigationHistory } from './utils/useNavigationHistory';
 import { syncAdEngine } from './utils/adEngine';
-import { getAdminUserIds, isAdminUser, isSuperAdminUser } from './utils/admin';
+import { getAdminUserIds, isAdminUser, isSuperAdminUser, addAdminUser, removeAdminUser } from './utils/admin';
 import { Loader2, Film, History, Flame, Zap, Compass, Clapperboard } from 'lucide-react';
 
 export default function App() {
@@ -221,9 +221,8 @@ export default function App() {
 
   // Synchronize Ad Engine & User Role with dynamic Role Policies & DB
   useEffect(() => {
-    const tgUser = getTelegramUserInfo();
-
     const resolveUserRole = async () => {
+      const tgUser = getTelegramUserInfo();
       // ═══════════════════════════════════════════════════════════════
       // 🔐 IRON GATE - DB IS THE SINGLE SOURCE OF TRUTH FOR ROLES
       // ═══════════════════════════════════════════════════════════════
@@ -284,8 +283,9 @@ export default function App() {
       syncAdsForCurrentUser();
     };
 
+    const currentTgUser = getTelegramUserInfo();
     const unsubscribeRealtime = subscribeToRealtimeRoleAndPolicy(
-      tgUser?.id,
+      currentTgUser?.id,
       (newRole) => {
         if (newRole) {
           const norm = String(newRole).toLowerCase().trim();
@@ -338,12 +338,95 @@ export default function App() {
     return counts;
   }, [moviesList, trendingMovies, actionMovies, sciFiMovies, dramaMovies]);
 
+  // Localhost Dev Mock User Switcher Engine
+  const [activeDevUser, setActiveDevUser] = useState(() => {
+    try {
+      const stored = localStorage.getItem('smd_dev_mock_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) { return null; }
+  });
+
+  const devMockUsers = [
+    { id: 6619130727, username: 'GTM_RX_1', first_name: 'Gowtham $X', role: 'super_admin', label: '👑 Gowtham (Super Admin)' },
+    { id: 6846236707, username: 'SMDOwner', first_name: 'SPARROW™', role: 'vip', label: '⭐ Sparrow (VIP)' },
+    { id: 885675538,  username: 'SMDxTG', first_name: 'SMDxTG', role: 'admin', label: '🛡️ SMDxTG (Admin)' },
+    { id: 5718648078, username: 'JalebiBae', first_name: 'Mobius', role: 'normal', label: '👤 Mobius (Normal)' }
+  ];
+
+  const switchDevUser = async (user) => {
+    try {
+      // ⚡ Fetch live avatar_url & role directly from Supabase DB
+      let realAvatar = '';
+      let realRole = user.role;
+
+      const { data: dbUser } = await supabase
+        .from('users')
+        .select('avatar_url, role, username, first_name')
+        .eq('telegram_user_id', user.id)
+        .maybeSingle();
+
+      if (dbUser) {
+        if (dbUser.avatar_url) realAvatar = dbUser.avatar_url;
+        if (dbUser.role) realRole = dbUser.role.toLowerCase();
+      }
+
+      const mockObj = { 
+        id: user.id, 
+        telegram_id: user.id,
+        username: dbUser?.username || user.username, 
+        first_name: dbUser?.first_name || user.first_name, 
+        photo_url: realAvatar,
+        avatar_url: realAvatar 
+      };
+
+      localStorage.setItem('smd_dev_mock_user', JSON.stringify(mockObj));
+      setActiveDevUser(mockObj);
+      setCurrentUserRole(realRole);
+
+      const evt = new CustomEvent('smd_user_role_changed', { detail: { role: realRole } });
+      window.dispatchEvent(evt);
+      document.dispatchEvent(evt);
+      triggerHaptic('medium');
+    } catch (e) {
+      console.warn('switchDevUser note:', e);
+    }
+  };
+
+  const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
   return (
     <div className={`min-h-screen transition-colors duration-500 relative flex flex-col items-stretch justify-start w-full ${
       darkMode 
         ? 'bg-[#0c0f18] text-zinc-100' 
         : 'bg-gradient-to-br from-slate-100 via-rose-50/20 via-50% to-indigo-50/30 text-slate-900'
     }`}>
+
+      {/* 🧪 LOCALHOST DEV ROLE TESTING TOOLBAR */}
+      {isLocalhost && (
+        <div className="z-50 bg-yellow-500/10 border-b border-yellow-500/30 px-3 py-1.5 backdrop-blur-md flex items-center justify-between text-[11px] gap-2 overflow-x-auto">
+          <div className="flex items-center gap-1.5 font-bold text-yellow-400 shrink-0">
+            <span>🧪 DEV ROLE TESTER:</span>
+            <span className="font-mono bg-yellow-400/20 px-1.5 py-0.5 rounded text-yellow-300 uppercase font-black">
+              Current: {currentUserRole}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {devMockUsers.map(u => (
+              <button
+                key={u.id}
+                onClick={() => switchDevUser(u)}
+                className={`px-2 py-0.5 rounded-full font-bold transition-all text-[10px] active:scale-95 ${
+                  (activeDevUser?.id === u.id || (currentUserRole === u.role && !activeDevUser))
+                    ? 'bg-yellow-400 text-black shadow-md shadow-yellow-400/30 font-black'
+                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                }`}
+              >
+                {u.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Ambient Radial Background Light Blobs for Modern Depth */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">

@@ -56,8 +56,8 @@ export default function Header({
     setShowProfileCard(!showProfileCard);
   };
 
-  // Fallback user avatar generator if photo_url is missing
-  const userPhoto = telegramUser?.photo_url;
+  // Fallback user avatar generator if photo_url / avatar_url is missing
+  const userPhoto = telegramUser?.photo_url || telegramUser?.avatar_url;
   const userName = telegramUser?.first_name || telegramUser?.username || 'SMD Member';
   const userHandle = telegramUser?.username ? `@${telegramUser.username}` : 'Premium Cinema Member';
 
@@ -223,7 +223,7 @@ export default function Header({
                 </div>
 
                 {/* Admin Panel Launcher Button - Only for authorized Admins */}
-                {isAdminUser(telegramUser?.id) && (
+                {isUserAdmin && (
                   <button
                     onClick={() => {
                       setShowProfileCard(false);

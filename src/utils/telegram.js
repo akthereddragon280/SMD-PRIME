@@ -75,7 +75,17 @@ export function getTelegramUserInfo() {
     if (typeof window !== 'undefined' && window.Telegram?.WebApp?.initDataUnsafe?.user) {
       return window.Telegram.WebApp.initDataUnsafe.user;
     }
-    return WebApp?.initDataUnsafe?.user || null;
+    if (WebApp?.initDataUnsafe?.user) {
+      return WebApp.initDataUnsafe.user;
+    }
+    // Localhost Dev Mock User Fallback for testing
+    if (typeof window !== 'undefined') {
+      try {
+        const mock = localStorage.getItem('smd_dev_mock_user');
+        if (mock) return JSON.parse(mock);
+      } catch (e) {}
+    }
+    return null;
   } catch (e) {
     return null;
   }
