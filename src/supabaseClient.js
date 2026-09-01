@@ -935,13 +935,15 @@ export async function updateUserRoleInSupabase(telegramId, newRole) {
     
     // Strict Whitelist Sanitization Engine
     let role = (newRole || 'normal').toLowerCase().trim();
-    const VALID_ROLES = ['normal', 'vip', 'premium', 'admin'];
+    const VALID_ROLES = ['normal', 'user', 'vip', 'premium', 'admin', 'super_admin', 'superadmin', 'owner'];
     if (!VALID_ROLES.includes(role)) {
       console.warn(`[RBAC Guard] Invalid role '${newRole}' provided. Falling back to 'normal'.`);
       role = 'normal';
     }
-    // Standardize 'premium' to 'vip'
+    // Standardize aliases
     if (role === 'premium') role = 'vip';
+    if (role === 'superadmin' || role === 'owner') role = 'super_admin';
+    if (role === 'user') role = 'normal';
 
     const idStr = String(telegramId).trim();
     const idNum = Number(idStr);
