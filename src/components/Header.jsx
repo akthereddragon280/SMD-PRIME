@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Search, Film, Moon, Sun, CheckCircle2, ShieldCheck, X, ShieldAlert } from 'lucide-react';
 import { triggerHaptic, getTelegramUserInfo } from '../utils/telegram';
-import { isAdminUser } from '../utils/admin';
+import { isAdminUser, isSuperAdminUser } from '../utils/admin';
 
 export default function Header({ 
   onOpenSearch, 
@@ -14,7 +14,29 @@ export default function Header({
 }) {
   const [showProfileCard, setShowProfileCard] = useState(false);
   const telegramUser = getTelegramUserInfo();
-  const isUserAdmin = (currentUserRole === 'admin') || isAdminUser(telegramUser?.id);
+  const isSuperAdmin  = (currentUserRole === 'super_admin') || isSuperAdminUser(telegramUser?.id, currentUserRole);
+  const isUserAdmin   = isSuperAdmin || (currentUserRole === 'admin') || isAdminUser(telegramUser?.id, currentUserRole);
+
+  // Role-based avatar ring colors (4 tiers)
+  const getRoleRingClass = () => {
+    if (isSuperAdmin)                                         return 'border-yellow-400 ring-2 ring-yellow-400/50 shadow-[0_0_14px_rgba(250,204,21,0.6)]'; // 👑 Super Admin – Gold Crown
+    if (currentUserRole === 'admin')                          return 'border-emerald-500 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.5)]';  // 🛡️ Admin – Green
+    if (currentUserRole === 'vip' || currentUserRole === 'premium') return 'border-violet-500 ring-2 ring-violet-400/40 shadow-[0_0_12px_rgba(139,92,246,0.5)]';  // ⭐ VIP – Violet
+    return 'border-red-500 ring-2 ring-red-500/30';                                                                                                              // 👤 Normal – Red
+  };
+  const getRoleAvatarBg = () => {
+    if (isSuperAdmin)                                         return 'bg-gradient-to-tr from-yellow-600 via-amber-500 to-yellow-300 border-yellow-400';
+    if (currentUserRole === 'admin')                          return 'bg-gradient-to-tr from-emerald-700 via-teal-600 to-emerald-400 border-emerald-400';
+    if (currentUserRole === 'vip' || currentUserRole === 'premium') return 'bg-gradient-to-tr from-violet-700 via-purple-500 to-violet-400 border-violet-400';
+    return 'bg-gradient-to-tr from-red-600 via-rose-600 to-red-400 border-red-400';
+  };
+  const getRoleBadgeLabel = () => {
+    if (isSuperAdmin)                   return { emoji: '👑', label: 'Super Administrator', color: 'text-yellow-500' };
+    if (currentUserRole === 'admin')    return { emoji: '🛡️', label: 'Platform Administrator', color: 'text-emerald-500' };
+    if (currentUserRole === 'vip' || currentUserRole === 'premium') return { emoji: '⭐', label: 'VIP Premium Streamer', color: 'text-violet-400' };
+    return { emoji: '👤', label: 'Standard Member', color: 'text-zinc-400' };
+  };
+  const roleBadge = getRoleBadgeLabel();
 
   const handleSearchClick = () => {
     triggerHaptic('light');
@@ -114,31 +136,26 @@ export default function Header({
                   }
                 }}
                 className="flex items-center gap-2 p-1 rounded-full hover:opacity-90 active:scale-95 transition-all group relative cursor-pointer"
-                title={isUserAdmin ? "Click to Open Admin Command Center" : "View Account Profile"}
+                title={isUserAdmin ? "Open Admin Command Center" : "View Account Profile"}
               >
-                {userPhoto ? (
-                  <img 
-                    src={userPhoto} 
-                    alt={userName} 
-                    className={`w-8 h-8 rounded-full border-2 object-cover transition-all ${
-                      isUserAdmin
-                        ? 'border-emerald-500 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.5)] group-hover:ring-emerald-400'
-                        : currentUserRole === 'vip' || currentUserRole === 'premium'
-                        ? 'border-amber-400 ring-2 ring-amber-400/40 shadow-[0_0_12px_rgba(251,191,36,0.5)] group-hover:ring-amber-300'
-                        : 'border-red-500 ring-2 ring-red-500/30 group-hover:ring-red-400'
-                    }`}
-                  />
-                ) : (
-                  <div className={`w-8 h-8 rounded-full text-white border-2 flex items-center justify-center text-xs font-black transition-all ${
-                    isUserAdmin
-                      ? 'bg-gradient-to-tr from-emerald-700 via-teal-600 to-emerald-400 border-emerald-400 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.5)]'
-                      : currentUserRole === 'vip' || currentUserRole === 'premium'
-                      ? 'bg-gradient-to-tr from-amber-600 via-orange-500 to-yellow-400 border-amber-300 ring-2 ring-amber-400/40 shadow-[0_0_12px_rgba(251,191,36,0.5)]'
-                      : 'bg-gradient-to-tr from-red-600 via-rose-600 to-red-400 border-red-400 ring-2 ring-red-500/30'
-                  }`}>
-                    {userName.charAt(0).toUpperCase()}
-                  </div>
-                )}
+                {/* Relative wrapper for crown pip */}
+                <div className="relative">
+                  {userPhoto ? (
+                    <img 
+                      src={userPhoto} 
+                      alt={userName} 
+                      className={`w-8 h-8 rounded-full border-2 object-cover transition-all ${getRoleRingClass()}`}
+                    />
+                  ) : (
+                    <div className={`w-8 h-8 rounded-full text-white border-2 flex items-center justify-center text-xs font-black transition-all ${getRoleAvatarBg()} ${getRoleRingClass().split(' ').slice(1).join(' ')}`}>
+                      {userName.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  {/* 👑 Super Admin crown pip */}
+                  {isSuperAdmin && (
+                    <span className="absolute -top-1.5 -right-1 text-[10px] leading-none drop-shadow-sm select-none">👑</span>
+                  )}
+                </div>
               </button>
             </div>
           </div>
@@ -195,10 +212,10 @@ export default function Header({
 
               <div className="w-full mt-4 pt-3 border-t border-slate-200 dark:border-zinc-800/80 flex flex-col gap-2.5 text-xs">
                 <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-100 dark:bg-zinc-900/80">
-                  <span className="font-semibold text-slate-500 dark:text-zinc-400">Account Status</span>
-                  <span className="flex items-center gap-1 font-bold text-emerald-500">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Premium Active</span>
+                  <span className="font-semibold text-slate-500 dark:text-zinc-400">Role</span>
+                  <span className={`flex items-center gap-1 font-bold text-xs ${roleBadge.color}`}>
+                    <span>{roleBadge.emoji}</span>
+                    <span>{roleBadge.label}</span>
                   </span>
                 </div>
 

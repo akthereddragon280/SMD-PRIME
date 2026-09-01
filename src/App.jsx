@@ -11,7 +11,7 @@ import PlayerGateway from './components/PlayerGateway';
 import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
 import { useNavigationHistory } from './utils/useNavigationHistory';
 import { syncAdEngine } from './utils/adEngine';
-import { getAdminUserIds } from './utils/admin';
+import { getAdminUserIds, isAdminUser, isSuperAdminUser } from './utils/admin';
 import { Loader2, Film, History, Flame, Zap, Compass, Clapperboard } from 'lucide-react';
 
 export default function App() {
@@ -216,36 +216,38 @@ export default function App() {
     };
   }, []);
 
-  // Dynamic Current User Role State ('normal' | 'vip' | 'admin')
+  // Dynamic Current User Role State ('normal' | 'vip' | 'admin' | 'super_admin')
   const [currentUserRole, setCurrentUserRole] = useState('normal');
 
-  // Synchronize Adsterra Ad Engine & User Role with dynamic Role Policies & DB
+  // Synchronize Ad Engine & User Role with dynamic Role Policies & DB
   useEffect(() => {
     const tgUser = getTelegramUserInfo();
 
     const resolveUserRole = async () => {
-      // 1. Primary: Fetch role directly from Supabase DB (Single Source of Truth)
+      // ═══════════════════════════════════════════════════════════════
+      // 🔐 IRON GATE - DB IS THE SINGLE SOURCE OF TRUTH FOR ROLES
+      // ═══════════════════════════════════════════════════════════════
       if (tgUser?.id) {
         const dbRole = await getUserRoleFromSupabase(tgUser.id);
         if (dbRole) {
-          const norm = dbRole.toLowerCase();
-          if (norm === 'admin') {
+          const norm = String(dbRole).toLowerCase().trim();
+          // super_admin & admin: grant admin list access
+          if (norm === 'super_admin' || norm === 'admin') {
             addAdminUser(tgUser.id);
-            return 'admin';
+            return norm; // return exact role ('super_admin' or 'admin')
           } else {
-            // Auto-purge stale LocalStorage cache if DB says non-admin!
+            // 🚨 DB says vip/normal → PURGE stale localStorage admin cache immediately!
             removeAdminUser(tgUser.id);
-            return norm;
+            return norm; // 'vip' | 'normal'
           }
         }
       }
 
-      // 2. Fallback: Check canonical isAdminUser helper (Dev ID 0 localhost fallback)
-      if (isAdminUser(tgUser?.id)) {
-        return 'admin';
-      }
+      // 2. Fallback: ENV-pinned Super Admin IDs (Dev ID 0 / localhost)
+      if (isSuperAdminUser(tgUser?.id)) return 'super_admin';
+      if (isAdminUser(tgUser?.id))      return 'admin';
 
-      // 3. Fallback to normal
+      // 3. Default
       return 'normal';
     };
 
@@ -253,16 +255,17 @@ export default function App() {
       const userRole = await resolveUserRole();
       setCurrentUserRole(userRole || 'normal');
 
-      // Security Guard: Auto-close admin modal IMMEDIATELY if user is no longer admin
-      if (userRole !== 'admin' && isAdminOpen) {
+      // 🔐 IRON GATE: Auto-close admin modal IMMEDIATELY for non-admin roles!
+      const isPrivilegedRole = userRole === 'admin' || userRole === 'super_admin';
+      if (!isPrivilegedRole && isAdminOpen) {
         setIsAdminOpen(false);
       }
 
       const policies = await getRolePolicies();
       const entitlements = getUserEntitlements(userRole, policies);
 
-      // HARD GUARD: If userRole is admin, force enable_ads to false 1000%!
-      const shouldEnable = userRole === 'admin' ? false : (entitlements.enable_ads !== false);
+      // HARD GUARD: Admin/Super Admin never sees ads!
+      const shouldEnable = isPrivilegedRole ? false : (entitlements.enable_ads !== false);
       syncAdEngine(shouldEnable);
     };
 
@@ -271,10 +274,11 @@ export default function App() {
     const handleSync = (e) => {
       const updatedRole = e?.detail?.role || e?.detail?.newRole;
       if (updatedRole) {
-        const normRole = String(updatedRole).toLowerCase();
+        const normRole = String(updatedRole).toLowerCase().trim();
         setCurrentUserRole(normRole);
-        if (normRole !== 'admin') {
-          setIsAdminOpen(false); // 0ms Instant Security Guard Auto-Close!
+        // 🔐 Close admin panel if role downgraded to vip/normal
+        if (normRole !== 'admin' && normRole !== 'super_admin') {
+          setIsAdminOpen(false);
         }
       }
       syncAdsForCurrentUser();
@@ -284,9 +288,9 @@ export default function App() {
       tgUser?.id,
       (newRole) => {
         if (newRole) {
-          const norm = String(newRole).toLowerCase();
+          const norm = String(newRole).toLowerCase().trim();
           setCurrentUserRole(norm);
-          if (norm !== 'admin') setIsAdminOpen(false);
+          if (norm !== 'admin' && norm !== 'super_admin') setIsAdminOpen(false);
         }
         syncAdsForCurrentUser();
       },
