@@ -37,8 +37,8 @@ globalThis.lastFlushTime = globalThis.lastFlushTime || Date.now();
  */
 async function flushDriveStatsToSupabase(env, batchCount) {
   if (!batchCount || batchCount <= 0) return;
-  const supabaseUrl = env.SUPABASE_URL || 'https://iwulcblngplsjtsipods.supabase.co';
-  const supabaseKey = env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3dWxjYmxuZ3Bsc2p0c2lwb2RzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcwNDEwNjMsImV4cCI6MjEwMjYxNzA2M30.4Y7B9eT1x26Sg6W0bX5vF6g7h8j9k0l1m2n3o4p5q6r';
+  const supabaseUrl = env.SUPABASE_URL || env.VITE_SUPABASE_URL || '';
+  const supabaseKey = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY || '';
 
   try {
     const rpcEndpoint = `${supabaseUrl.replace(/\/+$/, '')}/rest/v1/rpc/increment_gdrive_daily_stats`;

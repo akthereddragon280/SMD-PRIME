@@ -150,6 +150,30 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
     };
   }, []);
 
+  // 0ms Live Fetch & Sync Role from Supabase DB when Profile is Clicked
+  useEffect(() => {
+    if (!selectedUser) return;
+    const tgId = selectedUser.telegram_user_id || selectedUser.telegram_id || selectedUser.id;
+    if (!tgId) return;
+
+    let isMounted = true;
+    const syncLiveRole = async () => {
+      try {
+        const liveRole = await getUserRoleFromSupabase(tgId);
+        if (isMounted && liveRole) {
+          const normRole = liveRole.toLowerCase();
+          setSelectedUser(prev => (prev && String(prev.telegram_user_id || prev.id) === String(tgId)) ? { ...prev, role: normRole } : prev);
+          setRegisteredUsers(prev => prev.map(u => String(u.telegram_user_id || u.id) === String(tgId) ? { ...u, role: normRole } : u));
+        }
+      } catch (e) {
+        console.warn('Failed to live fetch role on profile click:', e);
+      }
+    };
+
+    syncLiveRole();
+    return () => { isMounted = false; };
+  }, [selectedUser?.id, selectedUser?.telegram_user_id]);
+
   // Fetch Movie Sources for Target Clone Control
   const fetchMovieSources = useCallback(async () => {
     setIsSourcesLoading(true);
