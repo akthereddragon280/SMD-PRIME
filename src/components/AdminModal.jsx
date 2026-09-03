@@ -8,7 +8,7 @@ import {
 import { 
   supabase, sanitizeTitle, getGlobalStreamingMode, setGlobalStreamingMode, 
   getRolePolicies, setRolePolicies, DEFAULT_ROLE_POLICIES, updateUserRoleInSupabase,
-  updateMovieSourceCloneTarget
+  getUserRoleFromSupabase, subscribeToRealtimeRoleAndPolicy, updateMovieSourceCloneTarget
 } from '../supabaseClient';
 import { getAdminUserIds, addAdminUser, removeAdminUser, isSuperAdminUser } from '../utils/admin';
 import { openExternalLink, triggerHaptic } from '../utils/telegram';
@@ -726,6 +726,10 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
           setActiveSaCount(saActiveCount);
         }
 
+        getRolePolicies().then(pols => {
+          if (pols) setRolePoliciesState(pols);
+        }).catch(() => {});
+
         fetchFilteredAnalytics('all', 'all');
         fetchMovieSources();
         runInfrastructureCheck();
@@ -737,12 +741,38 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
     }
     loadAdminData();
 
+    // ⚡ 0ms Live Realtime Subscription for Role Policies & User Changes across all Admin sessions
+    const unsubscribeRealtime = subscribeToRealtimeRoleAndPolicy(
+      null, 
+      (updatedRole) => {
+        // Reload users when role update occurs
+        supabase.from('users').select('*').order('created_at', { ascending: false }).then(({ data }) => {
+          if (data) setRegisteredUsers(data);
+        });
+      },
+      (freshPolicies) => {
+        if (freshPolicies) setRolePoliciesState(freshPolicies);
+      }
+    );
+
+    const handlePolicyEvent = (e) => {
+      if (e?.detail) setRolePoliciesState(e.detail);
+    };
+
+    window.addEventListener('smd_role_policies_changed', handlePolicyEvent);
+    document.addEventListener('smd_role_policies_changed', handlePolicyEvent);
+
     // 10-Second Live Telemetry Auto-Polling Interval
     const pollInterval = setInterval(() => {
       runInfrastructureCheck();
     }, 10000);
 
-    return () => clearInterval(pollInterval);
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+      if (typeof unsubscribeRealtime === 'function') unsubscribeRealtime();
+      window.removeEventListener('smd_role_policies_changed', handlePolicyEvent);
+      document.removeEventListener('smd_role_policies_changed', handlePolicyEvent);
+    };
   }, [fetchFilteredAnalytics, runInfrastructureCheck]);
 
   useEffect(() => {
@@ -1334,6 +1364,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                       : (isPrem ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20');
 
                     const handleTogglePolicy = (key, value) => {
+                      triggerHaptic('medium');
                       const updated = {
                         ...rolePolicies,
                         [roleKey]: {
@@ -1342,8 +1373,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                         }
                       };
                       setRolePoliciesState(updated);
-                      setIsSavingPolicies(true);
-                      setRolePolicies(updated).then(() => setIsSavingPolicies(false));
+                      setRolePolicies(updated);
                     };
 
                     return (
@@ -1519,7 +1549,7 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                        <div className="flex items-center justify-between pt-2 border-t border-white/5" onClick={(e) => e.stopPropagation()}>
                           {isSuper ? (
                             <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-md">OWNER</span>
                           ) : isBanned ? (
@@ -1527,18 +1557,58 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                               <Ban className="w-3 h-3" />
                               BANNED
                             </span>
-                          ) : isAdmin ? (
-                            <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-red-500/20 text-red-400 border border-red-500/30 rounded-md">ADMIN</span>
-                          ) : isVip ? (
-                            <span className="px-2 py-0.5 text-[9px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-md">⭐ VIP</span>
                           ) : (
-                            <span className="px-2 py-0.5 text-[9px] font-bold uppercase bg-zinc-800 text-zinc-400 border border-white/5 rounded-md">NORMAL</span>
+                            <select
+                              value={isAdmin ? 'admin' : isVip ? 'vip' : 'normal'}
+                              onChange={async (e) => {
+                                const targetRole = e.target.value;
+                                const tgId = user.telegram_user_id || user.id;
+                                triggerHaptic('medium');
+                                
+                                // 0ms Optimistic UI update in React state
+                                setRegisteredUsers(prev => prev.map(u => 
+                                  (String(u.id) === String(user.id) || String(u.telegram_user_id) === String(tgId))
+                                    ? { ...u, role: targetRole }
+                                    : u
+                                ));
+
+                                if (targetRole === 'admin') {
+                                  addAdminUser(tgId);
+                                  setAdminIds(prev => Array.from(new Set([...prev, Number(tgId)])));
+                                } else {
+                                  removeAdminUser(tgId);
+                                  setAdminIds(prev => prev.filter(id => String(id) !== String(tgId)));
+                                }
+
+                                const evt = new CustomEvent('smd_user_role_updated', {
+                                  detail: { telegram_user_id: tgId, role: targetRole, newRole: targetRole }
+                                });
+                                window.dispatchEvent(evt);
+                                document.dispatchEvent(evt);
+
+                                await updateUserRoleInSupabase(tgId, targetRole);
+                              }}
+                              className={`px-2 py-0.5 text-[9px] font-black uppercase rounded-md border outline-none cursor-pointer transition-colors ${
+                                isAdmin
+                                  ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                                  : isVip
+                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                                    : 'bg-zinc-800 text-zinc-300 border-white/10'
+                              }`}
+                            >
+                              <option value="normal" className="bg-zinc-900 text-zinc-300 font-bold">NORMAL USER</option>
+                              <option value="vip" className="bg-zinc-900 text-amber-400 font-bold">⭐ VIP / PREMIUM</option>
+                              <option value="admin" className="bg-zinc-900 text-red-400 font-bold">👑 ADMIN USER</option>
+                            </select>
                           )}
 
-                          <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
+                          <button 
+                            onClick={() => setSelectedUser(user)}
+                            className="text-[10px] font-mono text-zinc-500 hover:text-white flex items-center gap-1 transition-colors"
+                          >
                             <span>Details</span>
                             <ArrowRight className="w-3 h-3 text-zinc-400" />
-                          </span>
+                          </button>
                         </div>
                       </div>
                     );
@@ -2020,7 +2090,8 @@ export default function AdminModal({ onClose, darkMode, totalMoviesCount }) {
                         document.dispatchEvent(evt);
                       } catch (e) {}
 
-                      triggerToast(`Role updated to ${targetRole.toUpperCase()} in Supabase DB`);
+                      triggerHaptic('medium');
+                      console.log(`[RBAC Sync] Role updated to ${targetRole.toUpperCase()} in Supabase DB`);
 
                       // 2. Background Persistence to Supabase DB
                       const res = await updateUserRoleInSupabase(tgId, targetRole);

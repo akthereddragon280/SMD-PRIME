@@ -8,15 +8,20 @@ import { getExactMovieDuration } from '../utils/posters';
 import { getOptimalStreamSource, parseSizeInGB } from '../utils/streamHelpers';
 import { triggerIntentionalAd } from '../utils/adEngine';
 
-export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
+export default function MovieModal({ movie, onClose, onPlay, darkMode, userRole: propUserRole, rolePolicies: propRolePolicies }) {
   const [sources, setSources] = useState(movie?.sources || []);
   const [loadingSources, setLoadingSources] = useState(false);
   const [downloadingQuality, setDownloadingQuality] = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(null);
   const [dynamicDuration, setDynamicDuration] = useState(movie?.duration_seconds ? formatDurationString(movie.duration_seconds) : null);
-  const [userRole, setUserRole] = useState('normal');
-  const [rolePolicies, setRolePolicies] = useState(DEFAULT_ROLE_POLICIES);
+  const [userRole, setUserRole] = useState(propUserRole || 'normal');
+  const [rolePolicies, setRolePolicies] = useState(propRolePolicies || DEFAULT_ROLE_POLICIES);
   const [showUpgradeToast, setShowUpgradeToast] = useState(null);
+
+  useEffect(() => {
+    if (propUserRole) setUserRole(propUserRole.toLowerCase());
+    if (propRolePolicies) setRolePolicies(propRolePolicies);
+  }, [propUserRole, propRolePolicies]);
 
   // Global Streaming Mode State ('both' | 'download_only' | 'stream_only')
   const [streamingMode, setStreamingMode] = useState(() => {
@@ -196,6 +201,39 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
   });
 
   const exactDuration = dynamicDuration || (movie.duration && movie.duration !== '2h 15m' ? movie.duration : null) || getExactMovieDuration(movie.title, movie.uid, movie.duration);
+
+  const handleDownloadClick = async (source) => {
+    triggerHaptic('medium');
+
+    const entitlement = getUserEntitlements(userRole, rolePolicies);
+    if (entitlement.download_access === false) {
+      triggerHaptic('heavy');
+      setShowUpgradeToast(`🔒 Direct Downloads Restricted: Downloads are disabled for ${(userRole || 'normal').toUpperCase()} member tier by Admin Policy. Upgrade to VIP to enable downloads!`);
+      setTimeout(() => setShowUpgradeToast(null), 4000);
+      return;
+    }
+
+    if (!source) return;
+    setDownloadingQuality(source.quality || 'Default');
+    setDownloadProgress(0);
+
+    try {
+      logDownloadAnalytics(movie.id || movie.uid, source.quality, userRole);
+      triggerIntentionalAd({
+        userRole: userRole,
+        enableAds: entitlement.enable_ads,
+        actionType: 'download'
+      });
+      await downloadMovieStream(source, movie.title, (progress) => {
+        setDownloadProgress(progress);
+      });
+    } catch (err) {
+      console.error('Download error:', err);
+    } finally {
+      setDownloadingQuality(null);
+      setDownloadProgress(null);
+    }
+  };
 
   const handlePlayClick = (source) => {
     triggerHaptic('medium');
@@ -527,6 +565,24 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                 const heroSize = parseSizeInGB(activeHeroSource);
                 const isHeroExceedingLimit = heroSize > 4.0;
 
+                const qualityRankMap = { '4K': 4, '1080p': 3, '720p': 2, '480p': 1 };
+                const capRank = qualityRankMap[currentEntitlements.max_resolution] || 4;
+                const heroRes = formatCleanQualityBadge(activeHeroSource.quality);
+                const heroRank = qualityRankMap[heroRes] || 1;
+                const isHeroQualityCapped = heroRank > capRank;
+
+                if (isHeroQualityCapped) {
+                  return (
+                    <button
+                      onClick={() => handlePlayClick(activeHeroSource)}
+                      className="w-full flex items-center justify-center gap-2.5 font-extrabold text-xs py-4 px-6 rounded-2xl bg-zinc-900/90 border border-amber-500/40 text-amber-400 shadow-xl transition active:scale-[0.98] cursor-pointer"
+                    >
+                      <Lock className="w-4 h-4 text-amber-400" />
+                      <span>🔒 {heroRes} Quality Capped for {userRole.toUpperCase()} Role (Upgrade to VIP)</span>
+                    </button>
+                  );
+                }
+
                 if (streamingMode === 'download_only' || isHeroExceedingLimit) {
                   if (!hasDownloadAccess) {
                     return (
@@ -547,7 +603,7 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                     >
                       <Download className="w-5 h-5 ml-0.5" />
                       <span>
-                        Download Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''}{isHeroExceedingLimit ? ' • Download Only' : ''})
+                        Download Movie ({heroRes} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''}{isHeroExceedingLimit ? ' • Download Only' : ''})
                       </span>
                     </button>
                   );
@@ -560,7 +616,7 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                   >
                     <Play className="w-5 h-5 fill-white ml-0.5" />
                     <span>
-                      Play Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
+                      Play Movie ({heroRes} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
                     </span>
                   </button>
                 );
@@ -731,10 +787,33 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                       ) : !isExceedingLimit ? (
                         <button
                           onClick={() => handlePlayClick(src)}
-                          className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-extrabold rounded-xl transition shadow-md shadow-red-600/30 flex items-center gap-1.5 active:scale-95"
+                          className={`px-4 py-2 text-xs font-extrabold rounded-xl transition shadow-md flex items-center gap-1.5 active:scale-95 ${
+                            (() => {
+                              const qualityRankMap = { '4K': 4, '1080p': 3, '720p': 2, '480p': 1 };
+                              const capRank = qualityRankMap[currentEntitlements.max_resolution] || 4;
+                              const srcRank = qualityRankMap[res] || 1;
+                              return srcRank > capRank;
+                            })()
+                              ? 'bg-zinc-900 text-amber-400 border border-amber-500/30'
+                              : 'bg-red-600 hover:bg-red-500 text-white shadow-red-600/30'
+                          }`}
                         >
-                          <Play className="w-3.5 h-3.5 fill-white" />
-                          <span>Stream</span>
+                          {(() => {
+                            const qualityRankMap = { '4K': 4, '1080p': 3, '720p': 2, '480p': 1 };
+                            const capRank = qualityRankMap[currentEntitlements.max_resolution] || 4;
+                            const srcRank = qualityRankMap[res] || 1;
+                            return srcRank > capRank;
+                          })() ? (
+                            <>
+                              <Lock className="w-3.5 h-3.5 text-amber-400" />
+                              <span>🔒 {res} Capped</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-3.5 h-3.5 fill-white" />
+                              <span>Stream</span>
+                            </>
+                          )}
                         </button>
                       ) : (
                         <button

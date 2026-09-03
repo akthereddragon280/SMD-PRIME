@@ -12,11 +12,16 @@ import {
   upsertMovieDuration, 
   saveWatchProgress, 
   logStreamAnalytics, 
-  formatDurationString 
+  formatDurationString,
+  getRolePolicies,
+  getUserEntitlements,
+  DEFAULT_ROLE_POLICIES,
+  getUserRoleFromSupabase
 } from '../supabaseClient';
 import { getProxyStreamUrl, downloadMovieStream, rotateStreamUrlNode } from '../utils/proxy';
 import { getOptimalWorkerUrl } from '../utils/loadBalancer';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
+import { getOptimalStreamSource, extractQualityBase } from '../utils/streamHelpers';
 import ExternalPlayerMenu from './ExternalPlayerMenu';
 
 export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) {
@@ -257,21 +262,40 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
             setCurrentAudio(langsList[0]);
           }
 
-          const defaultSrc = availableSources.find(s => s.quality === '1080p') || 
-                             availableSources.find(s => s.quality === '720p') || 
-                             availableSources[0];
+          let effectiveDevRole = 'normal';
+          try {
+            const override = localStorage.getItem('smd_dev_role_override');
+            if (override) effectiveDevRole = override.toLowerCase();
+          } catch (e) {}
+
+          const pols = await getRolePolicies();
+          const entitlement = getUserEntitlements(effectiveDevRole, pols);
+          const maxResolutionCap = entitlement.max_resolution || '4K';
+
+          const defaultSrc = getOptimalStreamSource(availableSources, 'Tamil', maxResolutionCap) || availableSources[0];
           setCurrentQuality(defaultSrc.quality || '1080p');
           setActiveVideoUrl(getProxyStreamUrl(defaultSrc.drive_file_id || movie?.file_id, movieTitle, defaultSrc.quality || '1080p', defaultSrc.clone_file_ids));
         } else {
+          let effectiveDevRole = 'normal';
+          try {
+            const override = localStorage.getItem('smd_dev_role_override');
+            if (override) effectiveDevRole = override.toLowerCase();
+          } catch (e) {}
+
+          const pols = await getRolePolicies();
+          const entitlement = getUserEntitlements(effectiveDevRole, pols);
+          const maxResolutionCap = entitlement.max_resolution || '4K';
+
           const fallbackId = movie?.file_id || '1djKAD3UQmBPgkeBBLCrZjAW-D4Fod_Ng';
           const defaultSources = [
             { quality: '1080p', drive_file_id: fallbackId, file_size: '2.4 GB' },
             { quality: '720p', drive_file_id: fallbackId, file_size: '1.2 GB' },
             { quality: '480p', drive_file_id: fallbackId, file_size: '422 MB' }
           ];
+          const defaultSrc = getOptimalStreamSource(defaultSources, 'Tamil', maxResolutionCap) || defaultSources[defaultSources.length - 1];
           setSources(defaultSources);
-          setCurrentQuality('1080p');
-          setActiveVideoUrl(getProxyStreamUrl(fallbackId, movieTitle, '1080p'));
+          setCurrentQuality(defaultSrc.quality || '480p');
+          setActiveVideoUrl(getProxyStreamUrl(fallbackId, movieTitle, defaultSrc.quality || '480p'));
         }
       } catch (err) {
         console.error('Failed to fetch movie sources:', err);
@@ -438,10 +462,31 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   };
 
   // 4. Dynamic Live Quality Switcher (Preserves exact Playback Timestamp)
-  const handleQualityChange = (sourceObj) => {
+  const handleQualityChange = async (sourceObj) => {
     triggerHaptic('medium');
-    const savedTimestamp = videoRef.current?.currentTime || currentTime;
     const targetQuality = sourceObj.quality || 'HD';
+    const res = extractQualityBase(targetQuality);
+
+    let effectiveDevRole = 'normal';
+    try {
+      const override = localStorage.getItem('smd_dev_role_override');
+      if (override) effectiveDevRole = override.toLowerCase();
+    } catch (e) {}
+
+    const pols = await getRolePolicies();
+    const entitlement = getUserEntitlements(effectiveDevRole, pols);
+    const qualityRankMap = { '4K': 4, '1080p': 3, '720p': 2, '480p': 1 };
+    const capRank = qualityRankMap[entitlement.max_resolution] || 4;
+    const srcRank = qualityRankMap[res] || 1;
+
+    if (srcRank > capRank) {
+      triggerHaptic('heavy');
+      setTouchFeedback(`🔒 Quality Capped: ${effectiveDevRole.toUpperCase()} tier capped at ${entitlement.max_resolution}`);
+      setTimeout(() => setTouchFeedback(null), 3000);
+      return;
+    }
+
+    const savedTimestamp = videoRef.current?.currentTime || currentTime;
     const driveId = sourceObj.drive_file_id || movie?.file_id;
 
     setCurrentQuality(targetQuality);

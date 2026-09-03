@@ -8,16 +8,24 @@
  * 4. Fallback to highest quality "H264" under 4.0GB if no HEVC exists.
  * 5. Return null if ALL sources exceed 4.0GB.
  */
-export function getOptimalStreamSource(sources = [], preferredLang = 'Tamil') {
+export function getOptimalStreamSource(sources = [], preferredLang = 'Tamil', maxResolutionCap = '4K') {
   if (!Array.isArray(sources) || sources.length === 0) return null;
 
-  // Rule 1: Filter out sources > 4.0 GB (Hard Cutoff)
+  const qualityRank = { '4K': 4, '1080p': 3, '720p': 2, '480p': 1 };
+  const capRank = qualityRank[maxResolutionCap] || 4;
+
+  // Rule 1: Filter out sources > 4.0 GB (Hard Cutoff) & sources exceeding maxResolutionCap
   const streamableSources = sources.filter(s => {
     const size = parseSizeInGB(s);
-    return size > 0 && size <= 4.0;
+    const qRank = qualityRank[extractQualityBase(s.quality)] || 1;
+    return size > 0 && size <= 4.0 && qRank <= capRank;
   });
 
-  if (streamableSources.length === 0) return null;
+  if (streamableSources.length === 0) {
+    // Fallback to any source <= 4.0GB if all are capped out
+    const fallback = sources.filter(s => parseSizeInGB(s) <= 4.0);
+    return fallback.length > 0 ? fallback[0] : null;
+  }
 
   // Helper to check if a source matches the preferred language (e.g. Tamil)
   const matchesLang = (src, lang) => {
@@ -40,8 +48,6 @@ export function getOptimalStreamSource(sources = [], preferredLang = 'Tamil') {
     const codec = (src.video_codec || src.quality || '').toUpperCase();
     return codec.includes('HEVC') || codec.includes('X265') || codec.includes('H265');
   };
-
-  const qualityRank = { '4K': 4, '1080p': 3, '720p': 2, '480p': 1 };
 
   // Rule 2: Separate preferred language (Tamil) sources vs other language sources
   const langMatchedSources = streamableSources.filter(s => matchesLang(s, preferredLang));

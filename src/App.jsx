@@ -8,6 +8,7 @@ import VideoPlayer from './components/VideoPlayer';
 import SearchOverlay from './components/SearchOverlay';
 import AdminModal from './components/AdminModal';
 import PlayerGateway from './components/PlayerGateway';
+import DevRoleSwitcher from './components/DevRoleSwitcher';
 import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/telegram';
 import { useNavigationHistory } from './utils/useNavigationHistory';
 import { syncAdEngine } from './utils/adEngine';
@@ -218,10 +219,44 @@ export default function App() {
 
   // Dynamic Current User Role State ('normal' | 'vip' | 'admin' | 'super_admin')
   const [currentUserRole, setCurrentUserRole] = useState('normal');
+  const [rolePolicies, setRolePolicies] = useState(null);
+
+  // Synchronize dynamic Role Policies state
+  useEffect(() => {
+    getRolePolicies().then(pols => {
+      if (pols) setRolePolicies(pols);
+    });
+
+    const handlePolicyChange = (e) => {
+      if (e?.detail) setRolePolicies(e.detail);
+      else getRolePolicies().then(pols => { if (pols) setRolePolicies(pols); });
+    };
+
+    window.addEventListener('smd_role_policies_changed', handlePolicyChange);
+    document.addEventListener('smd_role_policies_changed', handlePolicyChange);
+    return () => {
+      window.removeEventListener('smd_role_policies_changed', handlePolicyChange);
+      document.removeEventListener('smd_role_policies_changed', handlePolicyChange);
+    };
+  }, []);
 
   // Synchronize Ad Engine & User Role with dynamic Role Policies & DB
   useEffect(() => {
     const resolveUserRole = async () => {
+      // 0. ⚡ Instant 0ms Developer Role Override (Localhost / Dev Testing)
+      try {
+        const override = localStorage.getItem('smd_dev_role_override');
+        if (override) {
+          const normOverride = String(override).toLowerCase().trim();
+          if (['normal', 'vip', 'premium', 'admin', 'super_admin'].includes(normOverride)) {
+            if (normOverride === 'admin' || normOverride === 'super_admin') {
+              addAdminUser(0);
+            }
+            return normOverride === 'premium' ? 'vip' : normOverride;
+          }
+        }
+      } catch (e) {}
+
       const tgUser = getTelegramUserInfo();
       // ═══════════════════════════════════════════════════════════════
       // 🔐 IRON GATE - DB IS THE SINGLE SOURCE OF TRUTH FOR ROLES
@@ -525,35 +560,6 @@ export default function App() {
                   );
                 })}
               </div>
-
-              {/* ⚡ High-ROI Sort By Dropdown Selector */}
-              <div className="shrink-0 flex items-center gap-1.5 pl-2 border-l border-white/10">
-                <div className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition-all ${
-                  darkMode 
-                    ? 'bg-zinc-900/90 border-zinc-800 text-zinc-200 hover:border-zinc-700' 
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-xs'
-                }`}>
-                  <ArrowUpDown className="w-3.5 h-3.5 text-red-500 shrink-0" />
-                  <select
-                    value={sortByOption}
-                    onChange={(e) => handleSortChange(e.target.value)}
-                    className="bg-transparent border-none outline-none font-extrabold text-[11px] cursor-pointer appearance-none pr-4 text-inherit"
-                    aria-label="Sort Movies By"
-                  >
-                    <option value="default" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>✨ Default</option>
-                    <option value="year_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>📅 Release Year (Newest)</option>
-                    <option value="year_asc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>📅 Release Year (Oldest)</option>
-                    <option value="rating_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>⭐ IMDb Rating (Highest)</option>
-                    <option value="rating_asc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>⭐ IMDb Rating (Lowest)</option>
-                    <option value="title_asc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>🔤 Title (A to Z)</option>
-                    <option value="title_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>🔤 Title (Z to A)</option>
-                    <option value="quality_4k" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>💎 4K Ultra HD First</option>
-                    <option value="tamil_first" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>🎬 Tamil Audio First</option>
-                    <option value="sources_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>⚡ Most Sources</option>
-                  </select>
-                  <span className="absolute right-2 pointer-events-none text-[9px]">▼</span>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -775,6 +781,8 @@ export default function App() {
             setActivePlayingMovie(m);
           }}
           darkMode={darkMode}
+          userRole={currentUserRole}
+          rolePolicies={rolePolicies}
         />
       )}
 
@@ -816,6 +824,14 @@ export default function App() {
           totalMoviesCount={moviesList.length}
         />
       )}
+
+      {/* Developer Role Switcher Widget (0ms Instant Testing) */}
+      <DevRoleSwitcher
+        currentUserRole={currentUserRole}
+        onRoleChanged={(newRole) => {
+          setCurrentUserRole(newRole || 'normal');
+        }}
+      />
 
     </div>
   );

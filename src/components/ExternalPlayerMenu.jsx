@@ -88,8 +88,9 @@ export function generatePlayerUrls(streamUrl) {
  * Bypasses Telegram Mini App hardware & browser decoding limitations by routing 
  * direct stream URLs into native Android / iOS external video player apps or copying link.
  */
-export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stream', variant = 'default', onExternalPlayTriggered }) {
+export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stream', variant = 'default', onExternalPlayTriggered, userRole = 'normal', rolePolicies }) {
   const [copied, setCopied] = useState(false);
+  const [policyToast, setPolicyToast] = useState(null);
 
   if (!streamUrl) return null;
 
@@ -100,23 +101,28 @@ export default function ExternalPlayerMenu({ streamUrl, movieTitle = 'Movie Stre
       e.preventDefault();
       e.stopPropagation();
     }
+
+    // 🔐 IRON GATE: Check External Player Policy for Active User Role
+    try {
+      const entitlement = getUserEntitlements(userRole, rolePolicies);
+      if (entitlement.external_player === false) {
+        triggerHaptic('medium');
+        setPolicyToast(`🔒 External Player Locked: Handoff disabled for ${userRole.toUpperCase()} tier by Admin Policy.`);
+        setTimeout(() => setPolicyToast(null), 3500);
+        return;
+      }
+
+      triggerIntentionalAd({
+        userRole: userRole,
+        enableAds: entitlement.enable_ads,
+        actionType: 'play'
+      });
+    } catch (err) {}
+
     triggerHaptic('heavy');
 
     const rawStreamUrl = urls.raw;
     if (!rawStreamUrl) return;
-
-    try {
-      const tgUser = getTelegramUserInfo();
-      const role = tgUser?.role || 'normal';
-      getRolePolicies().then(policies => {
-        const entitlement = getUserEntitlements(role, policies);
-        triggerIntentionalAd({
-          userRole: role,
-          enableAds: entitlement.enable_ads,
-          actionType: 'play'
-        });
-      });
-    } catch (err) {}
 
     // 1. Instantly trigger parent callback to pause HTML5 video & release hardware video decoder
     if (typeof onExternalPlayTriggered === 'function') {

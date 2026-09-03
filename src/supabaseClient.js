@@ -1074,7 +1074,7 @@ export async function updateUserRoleInSupabase(telegramId, newRole) {
     }
 
     // Broadcast live role change event across window & document for 0ms UI update
-    const eventData = { telegram_user_id: targetId, role: role };
+    const eventData = { telegram_user_id: validId, role: role };
     const evt1 = new CustomEvent('smd_user_role_updated', { detail: eventData });
     const evt2 = new CustomEvent('smd_user_role_changed', { detail: eventData });
     
