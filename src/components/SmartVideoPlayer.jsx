@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Download, AlertTriangle, Film, ShieldCheck, Cpu, HardDrive, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Play, Download, AlertTriangle, Film, ShieldCheck, Cpu, HardDrive, RefreshCw, CheckCircle2, Tv, ExternalLink } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { getProxyStreamUrl } from '../utils/proxy';
 import { logDownloadAnalytics } from '../supabaseClient';
 import { getTelegramUserInfo } from '../utils/telegram';
 import { getOptimalStreamSource, parseSizeInGB, extractQualityBase } from '../utils/streamHelpers';
+import { clearAdEngine } from '../utils/adEngine';
 import ExternalPlayerMenu from './ExternalPlayerMenu';
 
 /**
@@ -14,13 +16,39 @@ import ExternalPlayerMenu from './ExternalPlayerMenu';
  * - Browser HEVC Decode Error Detection & Instant H264 Fallback
  * - Sleek Obsidian Warning UX when stream exceeds 4GB
  * - Omni-Download Section (Ignores 4GB rule, maps ALL sources)
+ * - 100% Zero-Ad Lockdown Container
+ * - 100% User-Initiated External Player Options with 5s Auto-Hide
  */
 export default function SmartVideoPlayer({ movie, sources = [] }) {
   const [activeSource, setActiveSource] = useState(null);
   const [isFallbackMode, setIsFallbackMode] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isDownloading, setIsDownloading] = useState({});
+  const [showExternalMenu, setShowExternalMenu] = useState(false);
   const videoRef = useRef(null);
+  const externalMenuTimerRef = useRef(null);
+
+  // Toggle External Player Options with 5-Second Auto-Hide Timer
+  const handleToggleExternalMenu = () => {
+    if (showExternalMenu) {
+      setShowExternalMenu(false);
+      if (externalMenuTimerRef.current) clearTimeout(externalMenuTimerRef.current);
+    } else {
+      setShowExternalMenu(true);
+      if (externalMenuTimerRef.current) clearTimeout(externalMenuTimerRef.current);
+      externalMenuTimerRef.current = setTimeout(() => {
+        setShowExternalMenu(false);
+      }, 5000); // 5 Seconds Auto-Hide
+    }
+  };
+
+  // Strict Zero-Ad Lockdown: Ensure all ad scripts are purged when video player opens or closes
+  useEffect(() => {
+    clearAdEngine();
+    return () => {
+      clearAdEngine();
+    };
+  }, []);
 
   // Compute optimal stream source on mount or sources change
   useEffect(() => {
@@ -158,8 +186,42 @@ export default function SmartVideoPlayer({ movie, sources = [] }) {
         </div>
       )}
 
-      {/* 1b. EXTERNAL PLAYER INTENTS (VLC, MX PLAYER, SYSTEM DEFAULT) */}
-      <ExternalPlayerMenu streamUrl={playableUrl} movieTitle={movie?.title} />
+      {/* 1b. USER-INITIATED EXTERNAL PLAYER TOGGLE & 5-SECOND AUTO-HIDE MENU */}
+      <div className="space-y-3 select-none">
+        <button
+          onClick={handleToggleExternalMenu}
+          className="w-full flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-zinc-900 to-zinc-900 hover:from-amber-500/20 border border-amber-500/30 text-amber-300 transition-all active:scale-[0.98] shadow-lg group cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 group-hover:scale-110 transition-transform">
+              <Tv className="w-5 h-5" />
+            </div>
+            <div className="text-left">
+              <div className="text-xs font-black text-white group-hover:text-amber-300 transition-colors">
+                Play in External Player (VLC / MX Player)
+              </div>
+              <div className="text-[10px] font-mono text-amber-400/80">
+                {showExternalMenu ? 'Auto-closing in 5s... Tap to hide' : 'Tap to open VLC, MX Player & native apps'}
+              </div>
+            </div>
+          </div>
+          <ExternalLink className={`w-4 h-4 text-amber-400 transition-transform duration-200 ${showExternalMenu ? 'rotate-180' : ''}`} />
+        </button>
+
+        <AnimatePresence>
+          {showExternalMenu && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <ExternalPlayerMenu streamUrl={playableUrl} movieTitle={movie?.title} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* 2. OMNI-DOWNLOAD SECTION (IGNORES 4GB RULE) */}
       <div className="rounded-3xl border border-white/10 bg-zinc-900/80 p-6 backdrop-blur-xl space-y-4">

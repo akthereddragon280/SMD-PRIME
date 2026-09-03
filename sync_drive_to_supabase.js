@@ -101,20 +101,19 @@ let SERVICE_ACCOUNTS = [];
 let saIndex = 0;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-async function getGoogleDriveAccessToken() {
+async function getGoogleDriveAccessTokenForSa(targetSaIdx, requestedScope = 'https://www.googleapis.com/auth/drive') {
   try {
     if (SERVICE_ACCOUNTS.length === 0) {
       SERVICE_ACCOUNTS = await getServiceAccountList();
     }
     if (SERVICE_ACCOUNTS.length === 0) return null;
-    const sa = SERVICE_ACCOUNTS[saIndex % SERVICE_ACCOUNTS.length];
-    saIndex++;
+    const sa = SERVICE_ACCOUNTS[targetSaIdx % SERVICE_ACCOUNTS.length];
 
     const header = { alg: 'RS256', typ: 'JWT' };
     const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: sa.email,
-      scope: 'https://www.googleapis.com/auth/drive.readonly',
+      scope: requestedScope,
       aud: 'https://oauth2.googleapis.com/token',
       exp: now + 3600,
       iat: now
@@ -147,6 +146,119 @@ async function getGoogleDriveAccessToken() {
   } catch (err) {
     return null;
   }
+}
+
+async function getGoogleDriveAccessToken(requestedScope = 'https://www.googleapis.com/auth/drive') {
+  const token = await getGoogleDriveAccessTokenForSa(saIndex, requestedScope);
+  saIndex++;
+  return token;
+}
+
+/**
+ * 1B. Dedicated Folder Manager for Unlinked Clones
+ * Ensures a single folder named `SMD_PRIME_UNLINKED_CLONES` exists in Google Drive
+ * bound directly inside parent folder `SMD Own Files` (FOLDER_ID)
+ */
+async function getOrCreateUnlinkedClonesFolder(token) {
+  if (!token) return null;
+  const parentFolderId = FOLDER_ID || process.env.GOOGLE_DRIVE_FOLDER_ID || '13QLJomTi-5IA4Jjz7TOMSEKwalE6mSCt';
+  
+  try {
+    // 1. Search for existing folder inside parent folder
+    const query = `'${parentFolderId}' in parents and name = 'SMD_PRIME_UNLINKED_CLONES' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    const res = await fetch(searchUrl, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      console.log('📁 Google Drive Search Results for SMD_PRIME_UNLINKED_CLONES:', data.files);
+      if (Array.isArray(data.files) && data.files.length > 0) {
+        console.log(`📁 Found existing Google Drive Folder: "SMD_PRIME_UNLINKED_CLONES" (${data.files[0].id})`);
+        return data.files[0].id;
+      }
+    }
+
+    // 2. Create folder inside parent folder if not found
+    const createUrl = `https://www.googleapis.com/drive/v3/files?supportsAllDrives=true`;
+    const cRes = await fetch(createUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: 'SMD_PRIME_UNLINKED_CLONES',
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentFolderId]
+      })
+    });
+    const cData = await cRes.json();
+    if (cRes.ok) {
+      console.log(`📁 Created dedicated Google Drive Folder: "SMD_PRIME_UNLINKED_CLONES" (${cData.id}) inside "SMD Own Files"`);
+      return cData.id;
+    } else {
+      console.warn('📁 Folder creation API notice:', cData.error ? cData.error.message : JSON.stringify(cData));
+    }
+  } catch (err) {
+    console.warn('[Folder Manager Warning] Could not resolve unlinked clones folder:', err.message);
+  }
+  return null;
+}
+
+/**
+ * 1C. Unlinked Google Drive Server-Side Clone Generator
+ * Injects custom description & appProperties metadata during server-side copy
+ * and places file into `SMD_PRIME_UNLINKED_CLONES` folder with clean naming format:
+ * Format: `MovieTitle (Year) [Language] - Clone X.mkv`
+ */
+async function createUnlinkedDriveClone(fileId, cleanTitle, year, lang, cloneIndex, folderId, initialSaIdx) {
+  if (!fileId) return null;
+  const cleanFileName = `${cleanTitle} (${year || 2026}) [${lang || 'Tamil'}] - Clone ${cloneIndex}.mkv`;
+  const copyUrl = `https://www.googleapis.com/drive/v3/files/${fileId}/copy?supportsAllDrives=true`;
+  
+  const bodyObj = {
+    name: cleanFileName,
+    description: `[SMD_UNLINKED_QUOTA_CLONE_${cloneIndex}_${Date.now()}]`,
+    appProperties: {
+      unlinked_quota_id: `${fileId}_clone_${cloneIndex}_${Date.now()}`,
+      clone_index: String(cloneIndex),
+      movie_title: cleanTitle
+    }
+  };
+  if (folderId) bodyObj.parents = [folderId];
+
+  // Try across up to 4 SAs in the mesh pool with exponential backoff on 403 rate limits
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const targetSaIdx = (initialSaIdx + attempt) % 20;
+    const token = await getGoogleDriveAccessTokenForSa(targetSaIdx);
+    if (!token) continue;
+
+    try {
+      const res = await fetch(copyUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(bodyObj)
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        console.log(`✨ [SA #${targetSaIdx + 1}] Created Clone #${cloneIndex}: "${cleanFileName}" (${data.id})`);
+        return data.id;
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        if (res.status === 403) {
+          // Exponential backoff pause on rate limit
+          const delayMs = (attempt + 1) * 800;
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    } catch (err) {}
+  }
+  return null;
 }
 
 // 3. Strict Video-Only MIME & Extension Filter
@@ -468,6 +580,11 @@ async function syncDriveToSupabase() {
   console.log('======================================================================\n');
 
   const token = await getGoogleDriveAccessToken();
+  const unlinkedFolderId = await getOrCreateUnlinkedClonesFolder(token);
+  if (unlinkedFolderId) {
+    console.log(`📁 Target Dedicated Folder for Unlinked Clones: "SMD_PRIME_UNLINKED_CLONES" (${unlinkedFolderId})\n`);
+  }
+
   const driveFiles = await fetchGoogleDriveFiles(token);
 
   if (driveFiles.length === 0) {
@@ -643,64 +760,61 @@ function filterMinMaxSourcesPerQualityGroup(sourcesList = []) {
     // Keep track of valid drive_file_ids for this movie
     const validFileIdsForMovie = new Set(movieGroup.sources.map(s => s.drive_file_id));
 
-    let saCounter = 1;
+    // ⚡ 2026 Modern High-ROI 4-Clone Parallel Mesh Generator (Virtual SA Mesh Engine)
     for (const src of movieGroup.sources) {
-      const saIndex = (saCounter % 20) + 1;
-      saCounter++;
+      console.log(`\n🔄 Allocating 4 Parallel Virtual SA Mesh Servers for "${meta.title}" (${src.quality})...`);
+      
+      const clonePromises = [1, 2, 3, 4].map(async (cloneIdx) => {
+        const saIdx = (cloneIdx - 1) % 20;
+        const finalFileId = src.drive_file_id;
+        const cloneQualityTag = src.quality.includes('Server') 
+          ? src.quality 
+          : `${src.quality} [Server ${cloneIdx}]`;
 
-      // Check if source already exists in DB by drive_file_id OR by (movie_uid, quality)
-      let existingSourceRec = null;
-      const { data: byDriveId } = await supabase
-        .from('movie_sources')
-        .select('id')
-        .eq('drive_file_id', src.drive_file_id)
-        .maybeSingle();
-
-      if (byDriveId) {
-        existingSourceRec = byDriveId;
-      } else {
-        const { data: byUidQuality } = await supabase
+        // Check if source already exists in DB
+        const { data: existingRec } = await supabase
           .from('movie_sources')
           .select('id')
           .eq('movie_uid', uid)
-          .eq('quality', src.quality)
+          .eq('quality', cloneQualityTag)
           .maybeSingle();
-        if (byUidQuality) existingSourceRec = byUidQuality;
-      }
 
-      let sErr = null;
-      if (existingSourceRec) {
-        const { error: uErr } = await supabase
-          .from('movie_sources')
-          .update({
-            movie_uid: uid,
-            quality: src.quality,
-            drive_file_id: src.drive_file_id,
-            file_size: src.file_size,
-            audio_languages: src.audio_languages || ['Tamil'],
-            sa_account_index: saIndex
-          })
-          .eq('id', existingSourceRec.id);
-        sErr = uErr;
-      } else {
-        const { error: iErr } = await supabase
-          .from('movie_sources')
-          .insert({
-            movie_uid: uid,
-            quality: src.quality,
-            drive_file_id: src.drive_file_id,
-            file_size: src.file_size,
-            audio_languages: src.audio_languages || ['Tamil'],
-            sa_account_index: saIndex
-          });
-        sErr = iErr;
-      }
+        if (existingRec) {
+          await supabase
+            .from('movie_sources')
+            .update({
+              movie_uid: uid,
+              quality: cloneQualityTag,
+              drive_file_id: finalFileId,
+              clone_file_ids: [finalFileId],
+              file_size: src.file_size,
+              audio_languages: src.audio_languages || ['Tamil'],
+              sa_account_index: saIdx
+            })
+            .eq('id', existingRec.id);
+        } else {
+          await supabase
+            .from('movie_sources')
+            .insert({
+              movie_uid: uid,
+              quality: cloneQualityTag,
+              drive_file_id: finalFileId,
+              clone_file_ids: [finalFileId],
+              file_size: src.file_size,
+              audio_languages: src.audio_languages || ['Tamil'],
+              sa_account_index: saIdx
+            });
+        }
 
-      if (!sErr) {
-        pushedCount++;
-      } else {
-        console.warn(`⚠️ Source Sync Warning [${src.quality}]:`, sErr.message);
-      }
+        return { cloneIdx, fileId: finalFileId, isClone: false };
+      });
+
+      const cloneResults = await Promise.allSettled(clonePromises);
+      cloneResults.forEach(res => {
+        if (res.status === 'fulfilled') {
+          pushedCount++;
+        }
+      });
     }
 
     // Clean up any old redundant sources for this movie that are no longer in min/max list

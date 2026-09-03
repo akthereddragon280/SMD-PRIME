@@ -11,10 +11,10 @@
 export function getOptimalStreamSource(sources = [], preferredLang = 'Tamil') {
   if (!Array.isArray(sources) || sources.length === 0) return null;
 
-  // Rule 1: Filter out sources > 4.0 GB
+  // Rule 1: Filter out sources > 4.0 GB (Hard Cutoff)
   const streamableSources = sources.filter(s => {
-    const size = typeof s.size_gb === 'number' ? s.size_gb : parseSizeInGB(s.file_size);
-    return size <= 4.0;
+    const size = parseSizeInGB(s);
+    return size > 0 && size <= 4.0;
   });
 
   if (streamableSources.length === 0) return null;
@@ -70,16 +70,41 @@ export function getOptimalStreamSource(sources = [], preferredLang = 'Tamil') {
 }
 
 /**
- * HELPER: Fallback parser for size string like "1.8 GB" -> 1.8
+ * HELPER: Accurate parser for file size in GB from source object or size string.
+ * Specifically targets number preceding "GB" or "MB", ignoring resolution numbers like 1080p/720p.
  */
-export function parseSizeInGB(fileSizeStr) {
-  if (!fileSizeStr) return 0;
-  const match = String(fileSizeStr).match(/([\d.]+)\s*(GB|MB)?/i);
-  if (!match) return 0;
-  const val = parseFloat(match[1]);
-  const unit = (match[2] || 'GB').toUpperCase();
-  if (unit === 'MB') return val / 1024;
-  return val;
+export function parseSizeInGB(sourceInput) {
+  if (!sourceInput) return 0;
+  
+  if (typeof sourceInput === 'number') return sourceInput;
+  
+  if (typeof sourceInput === 'object') {
+    if (typeof sourceInput.size_gb === 'number' && sourceInput.size_gb > 0) {
+      return sourceInput.size_gb;
+    }
+  }
+
+  const text = typeof sourceInput === 'string' 
+    ? sourceInput 
+    : `${sourceInput.file_size || ''} ${sourceInput.quality || ''} ${sourceInput.title || ''}`;
+
+  if (!text) return 0;
+
+  // 1. Specific regex matching number immediately preceding "GB"
+  const gbMatch = text.match(/([\d.]+)\s*GB/i);
+  if (gbMatch && gbMatch[1]) {
+    const val = parseFloat(gbMatch[1]);
+    if (!isNaN(val) && val > 0) return val;
+  }
+
+  // 2. Specific regex matching number immediately preceding "MB"
+  const mbMatch = text.match(/([\d.]+)\s*MB/i);
+  if (mbMatch && mbMatch[1]) {
+    const val = parseFloat(mbMatch[1]);
+    if (!isNaN(val) && val > 0) return val / 1024;
+  }
+
+  return 0;
 }
 
 /**

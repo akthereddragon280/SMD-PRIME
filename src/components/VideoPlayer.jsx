@@ -333,8 +333,53 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
   }, [activeVideoUrl]);
 
   // Adaptive Stream Recovery & Instant Multi-Node Failover Engine
-  const handleVideoError = (err) => {
-    console.warn('[Video Engine Warning] Segment or node error encountered, rotating edge node silently:', err);
+  const handleVideoError = (evt) => {
+    const errorObj = videoRef.current ? videoRef.current.error : null;
+    const errorCode = errorObj ? errorObj.code : 0;
+    console.warn('[Video Engine Warning] HTML5 Video Error event:', { code: errorCode, message: errorObj?.message, evt });
+
+    // 1. Format/Codec Unsupported Error (Code 4: MEDIA_ERR_SRC_NOT_SUPPORTED or Code 3: MEDIA_ERR_DECODE)
+    if (errorCode === 4 || errorCode === 3) {
+      console.warn('[Video Engine] Format/Codec unsupported by browser (e.g. MKV/HEVC). Checking alternate MP4/x264 sources...');
+      
+      // Look for an alternate MP4/x264 source in sources array
+      const x264Source = Array.isArray(sources) && sources.find(s => {
+        const qStr = (s.quality || '').toLowerCase();
+        return qStr.includes('x264') || qStr.includes('mp4') || qStr.includes('1080p') || qStr.includes('720p');
+      });
+
+      if (x264Source && x264Source.drive_file_id && !activeVideoUrl.includes(x264Source.drive_file_id)) {
+        setTouchFeedback('Auto-switching to browser-compatible x264 format...');
+        setTimeout(() => setTouchFeedback(null), 3000);
+        setRetryCount(0);
+        handleQualityChange(x264Source);
+        return;
+      }
+
+      // If no alternate format available, provide touch feedback without auto-opening popup
+      setTouchFeedback('Format error: Tap OPEN button to launch in External Player (VLC / MX Player)');
+      setTimeout(() => setTouchFeedback(null), 3500);
+    }
+    
+    // 2. Auto Fallback: If 2 node rotation attempts fail on current file ID, switch to next available movie_sources record
+    if (retryCount >= 2 && Array.isArray(sources) && sources.length > 1) {
+      const currentSourceIndex = sources.findIndex(s => {
+        const url = activeVideoUrl || '';
+        return s.drive_file_id && url.includes(s.drive_file_id);
+      });
+
+      const nextIndex = currentSourceIndex >= 0 ? (currentSourceIndex + 1) % sources.length : 0;
+      if (nextIndex !== currentSourceIndex) {
+        const backupSource = sources[nextIndex];
+        console.log(`[Source Auto-Fallback] File ID failed/deleted, auto-switching to alternate source:`, backupSource);
+        setTouchFeedback(`Switching to backup stream (${backupSource.quality || 'HD'})...`);
+        setTimeout(() => setTouchFeedback(null), 2500);
+        setRetryCount(0);
+        handleQualityChange(backupSource);
+        return;
+      }
+    }
+
     if (retryCount < 6) {
       const nextCount = retryCount + 1;
       setRetryCount(nextCount);
@@ -354,7 +399,7 @@ export default function VideoPlayer({ movie, movieUid: propMovieUid, onClose }) 
         }
       }, 200);
     } else {
-      console.warn('[Video Engine] All node retries exhausted.');
+      console.warn('[Video Engine] All node retries and alternate sources exhausted.');
       setLoading(false);
       setVideoError(true);
     }

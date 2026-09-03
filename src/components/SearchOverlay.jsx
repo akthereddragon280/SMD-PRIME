@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Film, Star, Play, Sparkles, Filter, LayoutGrid, List, Flame, Download } from 'lucide-react';
+import { Search, X, Film, Star, Play, Sparkles, Filter, LayoutGrid, List, Flame, Download, ArrowUpDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MovieCard from './MovieCard';
 import { triggerHaptic, useTelegramBackButton } from '../utils/telegram';
-import { filterMoviesByMultiParam, sanitizeTitle } from '../supabaseClient';
+import { filterMoviesByMultiParam, sanitizeTitle, sortMoviesByOption } from '../supabaseClient';
 import { generateDynamicSVGPoster } from '../utils/posters';
 
 export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, darkMode, streamingMode: initialStreamingMode }) {
@@ -61,7 +61,23 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
   const genres = ['All', 'Action', 'Sci-Fi', 'Drama', 'Romance', 'Comedy'];
   const qualities = ['All', '1080p', '4K', '720p', 'Tamil'];
 
-  // Multi-Parameter Filtered Results
+  const [sortByOption, setSortByOption] = useState(() => {
+    try {
+      return localStorage.getItem('smd_search_sort_by') || 'default';
+    } catch (e) {
+      return 'default';
+    }
+  });
+
+  const handleSortChange = (opt) => {
+    triggerHaptic('light');
+    setSortByOption(opt);
+    try {
+      localStorage.setItem('smd_search_sort_by', opt);
+    } catch (e) {}
+  };
+
+  // Multi-Parameter Filtered & Sorted Results
   const filteredMovies = React.useMemo(() => {
     let list = movies || [];
 
@@ -93,8 +109,8 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
       });
     }
 
-    return list;
-  }, [movies, debouncedQuery, selectedGenre, selectedQuality]);
+    return sortMoviesByOption(list, sortByOption);
+  }, [movies, debouncedQuery, selectedGenre, selectedQuality, sortByOption]);
 
   // Lock body scroll
   useEffect(() => {
@@ -227,6 +243,41 @@ export default function SearchOverlay({ movies, onClose, onSelectMovie, onPlay, 
                 {q}
               </button>
             ))}
+
+            <div className={`h-4 w-[1px] mx-1 shrink-0 ${darkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
+
+            <span className={`text-[11px] font-extrabold uppercase tracking-wider shrink-0 flex items-center gap-1 ${
+              darkMode ? 'text-zinc-500' : 'text-slate-400'
+            }`}>
+              <ArrowUpDown className="w-3.5 h-3.5 text-red-500" /> Sort:
+            </span>
+
+            <div className={`relative inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-bold transition-all border shrink-0 ${
+              sortByOption !== 'default'
+                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white border-red-500 font-black shadow-md'
+                : darkMode
+                  ? 'bg-zinc-900/80 text-zinc-300 border border-zinc-800 hover:border-zinc-700'
+                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 shadow-xs'
+            }`}>
+              <select
+                value={sortByOption}
+                onChange={(e) => handleSortChange(e.target.value)}
+                className="bg-transparent border-none outline-none font-extrabold text-xs cursor-pointer appearance-none pr-3 text-inherit"
+                aria-label="Search Sort By"
+              >
+                <option value="default" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>✨ Default</option>
+                <option value="year_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>📅 Release Year (Newest)</option>
+                <option value="year_asc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>📅 Release Year (Oldest)</option>
+                <option value="rating_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>⭐ Rating (Highest)</option>
+                <option value="rating_asc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>⭐ Rating (Lowest)</option>
+                <option value="title_asc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>🔤 Title (A to Z)</option>
+                <option value="title_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>🔤 Title (Z to A)</option>
+                <option value="quality_4k" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>💎 4K First</option>
+                <option value="tamil_first" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>🎬 Tamil First</option>
+                <option value="sources_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>⚡ Most Sources</option>
+              </select>
+              <span className="pointer-events-none text-[8px]">▼</span>
+            </div>
           </div>
         </div>
 

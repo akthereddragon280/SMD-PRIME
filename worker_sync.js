@@ -27,9 +27,79 @@
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB Edge Chunk Boundary (5,242,880 Bytes)
 
-// Global Edge In-Memory Counter (Cold-Start Safe Isolate Memory)
+// Global Edge In-Memory Counter & RAM Health Map (0 KV Writes - High ROI)
 globalThis.gdriveRequestCount = globalThis.gdriveRequestCount || 0;
 globalThis.lastFlushTime = globalThis.lastFlushTime || Date.now();
+globalThis.cloneHealthMap = globalThis.cloneHealthMap || {};
+
+/**
+ * Check if a specific clone file ID is currently in 10-minute 403/429 cooldown
+ */
+function isCloneInCooldown(fileId) {
+  const record = globalThis.cloneHealthMap[fileId];
+  if (!record) return false;
+  if (record.cooldownUntil && Date.now() < record.cooldownUntil) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Record successful chunk fetch for a clone file ID
+ */
+function recordCloneSuccess(fileId) {
+  const record = globalThis.cloneHealthMap[fileId] || { score: 5, cooldownUntil: 0 };
+  record.score = Math.min(10, (record.score || 5) + 1);
+  record.cooldownUntil = 0;
+  globalThis.cloneHealthMap[fileId] = record;
+}
+
+/**
+ * Record 403 / 429 Quota Exceeded failure for a clone file ID
+ */
+function recordCloneFailure(fileId, status) {
+  const record = globalThis.cloneHealthMap[fileId] || { score: 5, cooldownUntil: 0 };
+  record.score = 0;
+  if (status === 403 || status === 429) {
+    record.cooldownUntil = Date.now() + (10 * 60 * 1000); // 10-minute cooldown in RAM
+  }
+  globalThis.cloneHealthMap[fileId] = record;
+}
+
+/**
+ * Speculative 5MB Next-Chunk Edge Prefetcher (Zero-Lag Next Chunk Loading)
+ */
+async function prefetchNextChunk(fileId, nextChunkIndex, saAuth) {
+  try {
+    const cacheKeyUrl = new URL(`https://cache.smd-prime.internal/chunk/${fileId}/${nextChunkIndex}`);
+    const cacheKey = new Request(cacheKeyUrl.toString(), { method: 'GET' });
+    const cache = caches.default;
+    const existing = await cache.match(cacheKey);
+    if (existing) return; // Next chunk already cached in Edge CDN!
+
+    const nextChunkStart = nextChunkIndex * CHUNK_SIZE;
+    const nextChunkEnd = nextChunkStart + CHUNK_SIZE - 1;
+    const driveUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+
+    const res = await fetch(driveUrl, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${saAuth.token}`,
+        Range: `bytes=${nextChunkStart}-${nextChunkEnd}`
+      }
+    });
+
+    if (res && (res.ok || res.status === 206)) {
+      const buffer = await res.arrayBuffer();
+      const cacheHeaders = new Headers();
+      cacheHeaders.set('Content-Type', res.headers.get('Content-Type') || 'video/mp4');
+      cacheHeaders.set('Content-Length', String(buffer.byteLength));
+      cacheHeaders.set('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+
+      await cache.put(cacheKey, new Response(buffer, { status: 200, headers: cacheHeaders }));
+    }
+  } catch (e) {}
+}
 
 /**
  * Asynchronously flush batched Google Drive request counts to Supabase
@@ -93,56 +163,76 @@ function getCorsHeaders() {
  * Reads access token directly from Cloudflare KV namespace `SA_TOKENS`.
  */
 async function resolveKvAccessToken(env) {
-  const kv = env.SA_TOKENS;
-  if (!kv) {
-    console.error('[Stream Worker] CRITICAL: SA_TOKENS KV binding is undefined!');
-    return null;
+  if (!globalThis.ramSaTokens) {
+    globalThis.ramSaTokens = new Map();
   }
 
-  try {
-    // Strategy A: Randomly select an email from ACTIVE_SA_EMAILS list stored in KV
-    const activeEmailsRaw = await kv.get('ACTIVE_SA_EMAILS');
-    if (activeEmailsRaw) {
-      const emails = JSON.parse(activeEmailsRaw);
-      if (Array.isArray(emails) && emails.length > 0) {
-        const selectedEmail = emails[Math.floor(Math.random() * emails.length)];
-        const token = await kv.get(`sa:${selectedEmail}`);
-        if (token) return { token, email: selectedEmail };
+  const kv = env.SA_TOKENS;
+
+  // Try reading from Cloudflare KV
+  if (kv) {
+    try {
+      // Strategy A: Randomly select an email from ACTIVE_SA_EMAILS list stored in KV
+      const activeEmailsRaw = await kv.get('ACTIVE_SA_EMAILS');
+      if (activeEmailsRaw) {
+        const emails = JSON.parse(activeEmailsRaw);
+        if (Array.isArray(emails) && emails.length > 0) {
+          const selectedEmail = emails[Math.floor(Math.random() * emails.length)];
+          const token = await kv.get(`sa:${selectedEmail}`);
+          if (token) {
+            globalThis.ramSaTokens.set(selectedEmail, token);
+            return { token, email: selectedEmail };
+          }
+        }
       }
-    }
 
-    // Strategy B: Fallback to index-based keys (sa_index:1 .. sa_index:10)
-    const activeCountRaw = await kv.get('ACTIVE_SA_COUNT');
-    const totalCount = activeCountRaw ? parseInt(activeCountRaw, 10) : 3;
-    const randomIndex = Math.floor(Math.random() * totalCount) + 1;
-    const token = await kv.get(`sa_index:${randomIndex}`);
-    if (token) return { token, email: `sa_index:${randomIndex}` };
+      // Strategy B: Fallback to index-based keys (sa_index:1 .. sa_index:10)
+      const activeCountRaw = await kv.get('ACTIVE_SA_COUNT');
+      const totalCount = activeCountRaw ? parseInt(activeCountRaw, 10) : 16;
+      const randomIndex = Math.floor(Math.random() * totalCount) + 1;
+      const token = await kv.get(`sa_index:${randomIndex}`);
+      if (token) return { token, email: `sa_index:${randomIndex}` };
 
-    // Strategy C: Direct fallback to all 16 active Service Account email keys
-    const defaultEmails = [
-      'tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-2@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-3@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-4@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-5@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-6@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-9@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-10@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-12@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-13@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-14@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-15@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-17@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-18@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-19@tgstream-drive-proxy.iam.gserviceaccount.com',
-      'tgstream-bot-20@tgstream-drive-proxy.iam.gserviceaccount.com'
-    ];
-    for (const email of defaultEmails) {
-      const token = await kv.get(`sa:${email}`);
-      if (token) return { token, email };
+      // Strategy C: Direct fallback to all active Service Account email keys
+      const defaultEmails = [
+        'tgstream-bot-1@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-2@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-3@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-4@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-5@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-6@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-9@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-10@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-12@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-13@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-14@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-15@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-17@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-18@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-19@tgstream-drive-proxy.iam.gserviceaccount.com',
+        'tgstream-bot-20@tgstream-drive-proxy.iam.gserviceaccount.com'
+      ];
+      for (const email of defaultEmails) {
+        const token = await kv.get(`sa:${email}`);
+        if (token) {
+          globalThis.ramSaTokens.set(email, token);
+          return { token, email };
+        }
+      }
+    } catch (err) {
+      console.warn('[Stream Worker] KV Token read error, falling back to RAM cache:', err.message);
     }
-  } catch (err) {
-    console.warn('[Stream Worker] KV Token read error:', err.message);
+  }
+
+  // RAM Fallback: If KV is temporarily unreachable, check cached tokens in globalThis RAM
+  if (globalThis.ramSaTokens.size > 0) {
+    const keys = Array.from(globalThis.ramSaTokens.keys());
+    const randomKey = keys[Math.floor(Math.random() * keys.length)];
+    const token = globalThis.ramSaTokens.get(randomKey);
+    if (token) {
+      console.log(`[Stream Worker] ⚡ Serving RAM-cached SA token for ${randomKey}`);
+      return { token, email: randomKey };
+    }
   }
 
   return null;
@@ -376,16 +466,25 @@ export default {
     const chunkStart = chunkIndex * CHUNK_SIZE;
     const chunkEndBoundary = chunkStart + CHUNK_SIZE - 1;
 
-    // Load Balancing & Fallback Retry Loop over Clone Array
-    const startIdx = Math.floor(Math.random() * fileIds.length);
+    // ADAPTIVE HIGH ROI HEALTH BALANCER: Filter out 403 cooldown clones & sort by health score
+    const healthyFileIds = fileIds.filter(id => !isCloneInCooldown(id));
+    const candidateFileIds = healthyFileIds.length > 0 ? healthyFileIds : fileIds;
+
+    // Sort candidate clones by RAM health score (highest health first)
+    const sortedFileIds = [...candidateFileIds].sort((a, b) => {
+      const scoreA = globalThis.cloneHealthMap[a]?.score || 5;
+      const scoreB = globalThis.cloneHealthMap[b]?.score || 5;
+      return scoreB - scoreA;
+    });
+
     let chunkResponse = null;
     let cacheStatus = 'MISS';
     let successfulFileId = null;
     let lastErrorStatus = 500;
     const cache = caches.default;
 
-    for (let i = 0; i < fileIds.length; i++) {
-      const currentFileId = fileIds[(startIdx + i) % fileIds.length];
+    for (let i = 0; i < sortedFileIds.length; i++) {
+      const currentFileId = sortedFileIds[i];
       
       // Cache Key URL for Cloudflare CDN (`caches.default`)
       const cacheKeyUrl = new URL(`https://cache.smd-prime.internal/chunk/${currentFileId}/${chunkIndex}`);
@@ -396,6 +495,8 @@ export default {
       if (chunkResponse) {
         cacheStatus = 'HIT';
         successfulFileId = currentFileId;
+        // Trigger speculative prefetch for next 5MB chunk on cache hit
+        ctx.waitUntil(prefetchNextChunk(currentFileId, chunkIndex + 1, saAuth));
         break;
       }
       
@@ -441,6 +542,9 @@ export default {
         }
 
         if (driveRes && (driveRes.ok || driveRes.status === 206)) {
+          // Record success in RAM Health Map (0 KV Writes)
+          recordCloneSuccess(currentFileId);
+
           // Buffer 5MB Chunk ArrayBuffer
           const chunkArrayBuffer = await driveRes.arrayBuffer();
 
@@ -456,6 +560,7 @@ export default {
           cacheHeaders.set('Content-Type', driveRes.headers.get('Content-Type') || 'video/mp4');
           cacheHeaders.set('Content-Length', String(chunkArrayBuffer.byteLength));
           cacheHeaders.set('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+          cacheHeaders.set('X-Chunk-Index', String(chunkIndex)); // Persist chunk index for HIT diagnostics
           if (totalFileSize) {
             cacheHeaders.set('X-Total-File-Size', String(totalFileSize));
           }
@@ -465,25 +570,29 @@ export default {
             headers: cacheHeaders
           });
 
-          // Write to Cloudflare CDN Cache asynchronously
+          // Write to Cloudflare CDN Cache asynchronously & Trigger Speculative Next-Chunk Prefetch
           ctx.waitUntil(cache.put(cacheKey, responseToCache.clone()));
+          ctx.waitUntil(prefetchNextChunk(currentFileId, chunkIndex + 1, saAuth));
+
           chunkResponse = responseToCache;
           successfulFileId = currentFileId;
           break; // Chunk successfully fetched and cached -> Exit Fallback Loop
 
         } else if (driveRes && driveRes.status === 404) {
-          // DEAD FILE DETECTED! Send background alert and try next clone
+          recordCloneFailure(currentFileId, 404);
           ctx.waitUntil(sendTelegramAlert(env, `🚨 <b>DEAD FILE DETECTED [404]</b>\nFile ID: <code>${currentFileId}</code>\nInitiating immediate fallback to next clone.`));
           chunkResponse = null;
           lastErrorStatus = 404;
           continue; // Try next Clone
         } else {
-          // Other Quota / Access Error after SA retries
+          // Record 403/429 failure in RAM Health Map (0 KV Writes)
+          recordCloneFailure(currentFileId, driveRes ? driveRes.status : 500);
           chunkResponse = null;
           lastErrorStatus = driveRes ? driveRes.status : 500;
           continue; // Try next Clone
         }
       } catch (err) {
+        recordCloneFailure(currentFileId, 500);
         chunkResponse = null;
         lastErrorStatus = 500;
         continue;
@@ -534,9 +643,10 @@ export default {
     resHeaders.set('Content-Range', `bytes ${actualServeStart}-${actualServeEnd}/${totalSizeStr}`);
     resHeaders.set('Content-Length', String(servedBuffer.byteLength));
     resHeaders.set('Cache-Control', 'public, max-age=86400, s-maxage=604800');
-    resHeaders.set('X-Cache-Status', cacheStatus);
-    resHeaders.set('X-Sa-Active', saAuth.email);
-    resHeaders.set('X-Chunk-Index', String(chunkIndex));
+    resHeaders.set('X-Cache-Status', cacheStatus);          // HIT or MISS
+    resHeaders.set('X-Sa-Active', saAuth.email);             // Active SA email
+    resHeaders.set('X-Sa-Index', saAuth.email.match(/(\d+)@/)?.[1] || '0'); // SA number
+    resHeaders.set('X-Chunk-Index', chunkResponse.headers.get('X-Chunk-Index') || String(chunkIndex));
     resHeaders.set('X-Clone-Count', String(cloneCount));
 
     // Stream Output with Abort Exception Protection

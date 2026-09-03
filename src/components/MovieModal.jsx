@@ -5,7 +5,7 @@ import { supabase, logDownloadAnalytics, formatDurationString, getRolePolicies, 
 import { getProxyStreamUrl, downloadMovieStream } from '../utils/proxy';
 import { triggerHaptic, useTelegramBackButton, getTelegramUserInfo } from '../utils/telegram';
 import { getExactMovieDuration } from '../utils/posters';
-import { getOptimalStreamSource } from '../utils/streamHelpers';
+import { getOptimalStreamSource, parseSizeInGB } from '../utils/streamHelpers';
 import { triggerIntentionalAd } from '../utils/adEngine';
 
 export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
@@ -199,7 +199,12 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
 
   const handlePlayClick = (source) => {
     triggerHaptic('medium');
-    if (streamingMode === 'download_only') {
+
+    // HARD GUARD: Files > 4.0GB CANNOT BE STREAMED (Strict Business Cutoff)
+    const sizeInGb = parseSizeInGB(source);
+    if (sizeInGb > 4.0 || streamingMode === 'download_only') {
+      setShowUpgradeToast(`⚠️ File size (${sizeInGb > 0 ? sizeInGb.toFixed(1) + 'GB' : 'Large File'}) exceeds 4GB streaming limit. Direct download initiated!`);
+      setTimeout(() => setShowUpgradeToast(null), 3500);
       handleDownloadClick(source);
       return;
     }
@@ -214,55 +219,6 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
     } catch (e) {}
 
     if (onPlay) onPlay(movie, source);
-  };
-
-  const handleDownloadClick = async (source) => {
-    triggerHaptic('heavy');
-    const entitlement = getUserEntitlements(userRole, rolePolicies);
-    if (!entitlement.download_access) {
-      setShowUpgradeToast('⭐ Direct Downloads require a Premium Account!');
-      setTimeout(() => setShowUpgradeToast(null), 3500);
-      return;
-    }
-
-    try {
-      triggerIntentionalAd({
-        userRole: userRole,
-        enableAds: entitlement.enable_ads,
-        actionType: 'download'
-      });
-    } catch (e) {}
-
-    const quality = source?.quality || '1080p';
-    const fileId = source?.drive_file_id || movie.file_id;
-    const movieUid = movie.uid || movie.id;
-    const movieTitle = movie.title || movie.name || 'Movie';
-    const tgUser = getTelegramUserInfo();
-
-    // Log download event asynchronously into Supabase download_analytics table
-    logDownloadAnalytics(movieUid, tgUser?.id || 0, quality).catch(err => {
-      console.warn('Failed to record download analytics:', err);
-    });
-
-    setDownloadingQuality(quality);
-
-    await downloadMovieStream(fileId, movieTitle, quality, (percent, state) => {
-      setDownloadProgress(percent);
-      if (state === 'completed') {
-        setTimeout(() => {
-          setDownloadingQuality(null);
-          setDownloadProgress(null);
-        }, 2000);
-      }
-    });
-  };
-
-  const parseSizeInGB = (sizeStr) => {
-    if (!sizeStr) return 0;
-    const str = String(sizeStr).toUpperCase().trim();
-    const val = parseFloat(str.replace(/[^0-9.]/g, '')) || 0;
-    if (str.includes('MB')) return val / 1024;
-    return val;
   };
 
   // 1. Helper to extract and normalize audio languages for a source
@@ -568,15 +524,31 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
               (() => {
                 const currentEntitlements = getUserEntitlements(userRole, rolePolicies);
                 const hasDownloadAccess = currentEntitlements.download_access !== false;
+                const heroSize = parseSizeInGB(activeHeroSource);
+                const isHeroExceedingLimit = heroSize > 4.0;
 
-                if (streamingMode === 'download_only' && !hasDownloadAccess) {
+                if (streamingMode === 'download_only' || isHeroExceedingLimit) {
+                  if (!hasDownloadAccess) {
+                    return (
+                      <button
+                        onClick={() => handleDownloadClick(activeHeroSource)}
+                        className="w-full flex items-center justify-center gap-2.5 font-extrabold text-xs py-4 px-6 rounded-2xl bg-zinc-900/90 border border-amber-500/40 text-amber-400 shadow-xl transition active:scale-[0.98] cursor-pointer"
+                      >
+                        <Lock className="w-4 h-4 text-amber-400" />
+                        <span>🔒 Direct Downloads Disabled for {userRole.toUpperCase()} Role (Upgrade for Access)</span>
+                      </button>
+                    );
+                  }
+
                   return (
                     <button
                       onClick={() => handleDownloadClick(activeHeroSource)}
-                      className="w-full flex items-center justify-center gap-2.5 font-extrabold text-xs py-4 px-6 rounded-2xl bg-zinc-900/90 border border-amber-500/40 text-amber-400 shadow-xl transition active:scale-[0.98]"
+                      className="w-full flex items-center justify-center gap-3 font-black text-sm py-4 px-6 rounded-2xl shadow-xl transition active:scale-[0.98] bg-gradient-to-r from-amber-600 via-amber-500 to-orange-600 hover:brightness-110 text-white shadow-amber-600/35 border border-amber-400/30 cursor-pointer"
                     >
-                      <Lock className="w-4 h-4 text-amber-400" />
-                      <span>🔒 Direct Downloads Disabled for {userRole.toUpperCase()} Role (Upgrade for Access)</span>
+                      <Download className="w-5 h-5 ml-0.5" />
+                      <span>
+                        Download Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''}{isHeroExceedingLimit ? ' • Download Only' : ''})
+                      </span>
                     </button>
                   );
                 }
@@ -584,27 +556,12 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                 return (
                   <button
                     onClick={() => handlePlayClick(activeHeroSource)}
-                    className={`w-full flex items-center justify-center gap-3 font-black text-sm py-4 px-6 rounded-2xl shadow-xl transition active:scale-[0.98] ${
-                      streamingMode === 'download_only'
-                        ? 'bg-gradient-to-r from-amber-600 via-amber-500 to-orange-600 hover:brightness-110 text-white shadow-amber-600/35 border border-amber-400/30'
-                        : 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 hover:brightness-110 text-white shadow-red-600/35 border border-red-400/30'
-                    }`}
+                    className="w-full flex items-center justify-center gap-3 font-black text-sm py-4 px-6 rounded-2xl shadow-xl transition active:scale-[0.98] bg-gradient-to-r from-red-600 via-red-500 to-rose-600 hover:brightness-110 text-white shadow-red-600/35 border border-red-400/30 cursor-pointer"
                   >
-                    {streamingMode === 'download_only' ? (
-                      <>
-                        <Download className="w-5 h-5 ml-0.5" />
-                        <span>
-                          Download Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-5 h-5 fill-white ml-0.5" />
-                        <span>
-                          Play Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
-                        </span>
-                      </>
-                    )}
+                    <Play className="w-5 h-5 fill-white ml-0.5" />
+                    <span>
+                      Play Movie ({formatCleanQualityBadge(activeHeroSource.quality)} • {selectedAudioFilter}{activeHeroSource.file_size ? ` • ${activeHeroSource.file_size}` : ''})
+                    </span>
                   </button>
                 );
               })()
@@ -793,7 +750,7 @@ export default function MovieModal({ movie, onClose, onPlay, darkMode }) {
                         </button>
                       )}
                       
-                      {streamingMode !== 'stream_only' && streamingMode !== 'download_only' && (
+                      {!isExceedingLimit && streamingMode !== 'stream_only' && streamingMode !== 'download_only' && (
                         <button
                           onClick={() => handleDownloadClick(src)}
                           disabled={downloadingQuality === src.quality}

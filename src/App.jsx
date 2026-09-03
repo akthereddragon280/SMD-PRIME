@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching, getCachedMovies, getGlobalStreamingMode, sortMoviesWithPosterPriority, getRolePolicies, getUserEntitlements, getUserRoleFromSupabase, subscribeToRealtimeRoleAndPolicy } from './supabaseClient';
+import { fetchMoviesFromSupabase, upsertTelegramUser, fetchContinueWatching, getCachedMovies, getGlobalStreamingMode, sortMoviesWithPosterPriority, sortMoviesByOption, getRolePolicies, getUserEntitlements, getUserRoleFromSupabase, subscribeToRealtimeRoleAndPolicy } from './supabaseClient';
 import Header from './components/Header';
 import HeroBanner from './components/HeroBanner';
 import MovieRow from './components/MovieRow';
@@ -12,7 +12,7 @@ import { initTelegramApp, triggerHaptic, getTelegramUserInfo } from './utils/tel
 import { useNavigationHistory } from './utils/useNavigationHistory';
 import { syncAdEngine } from './utils/adEngine';
 import { getAdminUserIds, isAdminUser, isSuperAdminUser, addAdminUser, removeAdminUser } from './utils/admin';
-import { Loader2, Film, History, Flame, Zap, Compass, Clapperboard } from 'lucide-react';
+import { Loader2, Film, History, Flame, Zap, Compass, Clapperboard, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
 
 export default function App() {
   // Check if current route is the HTTPS Bounce Gateway
@@ -316,27 +316,48 @@ export default function App() {
     };
   }, [isAdminOpen]);
 
-  // Filter movies strictly from Google Drive synced list
-  const heroMovie = moviesList.length > 0 ? (moviesList.find((m) => m.isHero) || moviesList[0]) : null;
-  const trendingMovies = moviesList.filter((m) => m.trending || Number(m.rating) >= 7.5);
-  const actionMovies = moviesList.filter((m) => /action/i.test(m.genre || ''));
-  const sciFiMovies = moviesList.filter((m) => /sci/i.test(m.genre || ''));
-  const dramaMovies = moviesList.filter((m) => /drama/i.test(m.genre || ''));
+  // Sort By state for catalog movies ('default' | 'year_desc' | 'year_asc' | 'rating_desc' | 'rating_asc' | 'title_asc' | 'title_desc' | 'quality_4k' | 'tamil_first' | 'sources_desc')
+  const [sortByOption, setSortByOption] = useState(() => {
+    try {
+      return localStorage.getItem('smd_sort_by_option') || 'default';
+    } catch (e) {
+      return 'default';
+    }
+  });
+
+  const handleSortChange = (newSort) => {
+    triggerHaptic('medium');
+    setSortByOption(newSort);
+    try {
+      localStorage.setItem('smd_sort_by_option', newSort);
+    } catch (e) {}
+  };
+
+  // Filter & sort movies strictly from Google Drive synced list
+  const sortedMoviesList = React.useMemo(() => {
+    return sortMoviesByOption(moviesList, sortByOption);
+  }, [moviesList, sortByOption]);
+
+  const heroMovie = sortedMoviesList.length > 0 ? (sortedMoviesList.find((m) => m.isHero) || sortedMoviesList[0]) : null;
+  const trendingMovies = sortedMoviesList.filter((m) => m.trending || Number(m.rating) >= 7.5);
+  const actionMovies = sortedMoviesList.filter((m) => /action/i.test(m.genre || ''));
+  const sciFiMovies = sortedMoviesList.filter((m) => /sci/i.test(m.genre || ''));
+  const dramaMovies = sortedMoviesList.filter((m) => /drama/i.test(m.genre || ''));
 
   const categories = ['All', 'Trending', 'Action', 'Sci-Fi', 'Drama', 'Thriller', 'Comedy'];
 
   // Dynamic Live Category File Counts Calculation Engine
   const categoryCounts = React.useMemo(() => {
     const counts = {};
-    counts['All'] = moviesList.length;
+    counts['All'] = sortedMoviesList.length;
     counts['Trending'] = trendingMovies.length;
     counts['Action'] = actionMovies.length;
     counts['Sci-Fi'] = sciFiMovies.length;
     counts['Drama'] = dramaMovies.length;
-    counts['Thriller'] = moviesList.filter((m) => /thriller/i.test(m.genre || '')).length;
-    counts['Comedy'] = moviesList.filter((m) => /comedy/i.test(m.genre || '')).length;
+    counts['Thriller'] = sortedMoviesList.filter((m) => /thriller/i.test(m.genre || '')).length;
+    counts['Comedy'] = sortedMoviesList.filter((m) => /comedy/i.test(m.genre || '')).length;
     return counts;
-  }, [moviesList, trendingMovies, actionMovies, sciFiMovies, dramaMovies]);
+  }, [sortedMoviesList, trendingMovies, actionMovies, sciFiMovies, dramaMovies]);
 
   // Localhost Dev Mock User Switcher Engine
   const [activeDevUser, setActiveDevUser] = useState(() => {
@@ -471,37 +492,68 @@ export default function App() {
               ? 'bg-[#0c0f18]/85 backdrop-blur-3xl backdrop-saturate-200 border-white/[0.08] shadow-lg shadow-black/40' 
               : 'bg-white/85 backdrop-blur-3xl backdrop-saturate-200 border-slate-200/80 shadow-md'
           }`}>
-            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-touch py-0.5">
-              {categories.map((cat) => {
-                const count = categoryCounts[cat] ?? 0;
-                return (
-                  <button
-                    key={cat}
-                    onClick={() => {
-                      triggerHaptic('light');
-                      setActiveCategory(cat);
-                    }}
-                    className={`px-3.5 py-1.5 rounded-2xl text-xs font-extrabold transition-all whitespace-nowrap active:scale-95 flex items-center gap-1.5 ${
-                      activeCategory === cat
-                        ? 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white shadow-lg shadow-red-600/35 border border-red-400/40 transform scale-[1.02]'
-                        : darkMode
-                          ? 'bg-zinc-900/90 text-zinc-300 border border-zinc-800/90 hover:bg-zinc-800/80 backdrop-blur-md'
-                          : 'bg-white/90 text-slate-700 border border-slate-200/90 shadow-xs hover:bg-slate-100/90 backdrop-blur-md'
-                    }`}
+            <div className="flex items-center justify-between gap-2 py-0.5">
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-touch flex-1">
+                {categories.map((cat) => {
+                  const count = categoryCounts[cat] ?? 0;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => {
+                        triggerHaptic('light');
+                        setActiveCategory(cat);
+                      }}
+                      className={`px-3.5 py-1.5 rounded-2xl text-xs font-extrabold transition-all whitespace-nowrap active:scale-95 flex items-center gap-1.5 ${
+                        activeCategory === cat
+                          ? 'bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white shadow-lg shadow-red-600/35 border border-red-400/40 transform scale-[1.02]'
+                          : darkMode
+                            ? 'bg-zinc-900/90 text-zinc-300 border border-zinc-800/90 hover:bg-zinc-800/80 backdrop-blur-md'
+                            : 'bg-white/90 text-slate-700 border border-slate-200/90 shadow-xs hover:bg-slate-100/90 backdrop-blur-md'
+                      }`}
+                    >
+                      <span>{cat}</span>
+                      <span className={`px-1.5 py-0.2 text-[10px] font-mono rounded-full font-black ${
+                        activeCategory === cat
+                          ? 'bg-black/25 text-white'
+                          : darkMode
+                            ? 'bg-zinc-800 text-zinc-400'
+                            : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* ⚡ High-ROI Sort By Dropdown Selector */}
+              <div className="shrink-0 flex items-center gap-1.5 pl-2 border-l border-white/10">
+                <div className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl border text-xs font-bold transition-all ${
+                  darkMode 
+                    ? 'bg-zinc-900/90 border-zinc-800 text-zinc-200 hover:border-zinc-700' 
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-xs'
+                }`}>
+                  <ArrowUpDown className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                  <select
+                    value={sortByOption}
+                    onChange={(e) => handleSortChange(e.target.value)}
+                    className="bg-transparent border-none outline-none font-extrabold text-[11px] cursor-pointer appearance-none pr-4 text-inherit"
+                    aria-label="Sort Movies By"
                   >
-                    <span>{cat}</span>
-                    <span className={`px-1.5 py-0.2 text-[10px] font-mono rounded-full font-black ${
-                      activeCategory === cat
-                        ? 'bg-black/25 text-white'
-                        : darkMode
-                          ? 'bg-zinc-800 text-zinc-400'
-                          : 'bg-slate-100 text-slate-600'
-                    }`}>
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
+                    <option value="default" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>✨ Default</option>
+                    <option value="year_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>📅 Release Year (Newest)</option>
+                    <option value="year_asc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>📅 Release Year (Oldest)</option>
+                    <option value="rating_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>⭐ IMDb Rating (Highest)</option>
+                    <option value="rating_asc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>⭐ IMDb Rating (Lowest)</option>
+                    <option value="title_asc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>🔤 Title (A to Z)</option>
+                    <option value="title_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>🔤 Title (Z to A)</option>
+                    <option value="quality_4k" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>💎 4K Ultra HD First</option>
+                    <option value="tamil_first" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>🎬 Tamil Audio First</option>
+                    <option value="sources_desc" className={darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>⚡ Most Sources</option>
+                  </select>
+                  <span className="absolute right-2 pointer-events-none text-[9px]">▼</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -646,7 +698,7 @@ export default function App() {
                     {/* Catch-all for movies in synced library */}
                     <MovieRow
                       title="All Synced Library Files"
-                      movies={moviesList}
+                      movies={sortedMoviesList}
                       onSelectMovie={(m) => setSelectedMovie(m)}
                       onPlay={(m) => {
                         if (streamingMode === 'download_only') {
@@ -668,7 +720,7 @@ export default function App() {
                       <span>{activeCategory} Movies</span>
                     </h2>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {moviesList
+                      {sortedMoviesList
                         .filter((m) => activeCategory === 'Trending' ? m.trending : m.genre === activeCategory)
                         .map((movie) => (
                           <div key={movie.id} className="flex justify-center">

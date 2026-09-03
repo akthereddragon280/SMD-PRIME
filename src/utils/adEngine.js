@@ -55,8 +55,9 @@ export function triggerIntentionalAd({ userRole = 'normal', enableAds = true, ac
   try {
     const role = (userRole || 'normal').toLowerCase();
 
-    // 1. ABSOLUTE HARD GUARD: Admin & Premium users NEVER get ads!
-    if (role === 'admin' || role === 'premium' || enableAds === false) {
+    // 1. ABSOLUTE HARD GUARD: Admin & Premium / VIP Roles NEVER get ads!
+    const isElevatedRole = role === 'admin' || role === 'premium' || role === 'diamond' || role === 'gold';
+    if (isElevatedRole || enableAds === false) {
       console.log(`🛡️ [AdEngine] Ad Trigger Guard: Blocked for role=${role}, enableAds=${enableAds}`);
       clearAdEngine();
       return false;

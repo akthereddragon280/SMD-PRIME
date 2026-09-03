@@ -128,8 +128,12 @@ export function getOptimalWorkerUrl() {
     return healthyWorkers[0];
   }
 
-  // If ALL nodes are marked down, fallback to workers[0]
-  console.warn('[Load Balancer] ⚠️ All nodes marked down, falling back to Primary Node 1');
+  // If ALL nodes are marked down, reset health state immediately to allow silent self-healing retry
+  console.warn('[Load Balancer] ⚠️ All nodes marked down, self-healing & resetting node health state');
+  nodeHealthRegistry.clear();
+  try {
+    sessionStorage.removeItem('smd_node_health');
+  } catch (e) {}
   return workers[0];
 }
 
